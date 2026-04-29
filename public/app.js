@@ -1,5 +1,6 @@
 const state = {
   token: localStorage.getItem('leohub.admin.token') || '',
+  users: [],
   offers: [],
   activeOfferId: localStorage.getItem('leohub.active.offer') || '',
   activeView: 'overview',
@@ -53,13 +54,15 @@ function setView(view) {
   $(`#view-${view}`)?.classList.remove('hidden');
   const titles = {
     overview: 'Visao geral',
+    users: 'Usuarios',
     offers: 'Ofertas',
-    offer: 'Painel da oferta',
+    offer: 'Admin da oferta',
     integrations: 'Integracoes',
     docs: 'Documentacao'
   };
   $('#view-title').textContent = titles[view] || 'LEOHUB';
   if (view === 'offer') renderOfferPanel();
+  if (view === 'offers') renderOfferOwnerSelect();
   if (view === 'integrations') renderSettingsForm();
   if (view === 'docs') renderDocs();
 }
@@ -72,6 +75,7 @@ async function bootstrap() {
   try {
     const data = await api('/api/admin/bootstrap');
     state.baseUrl = data.baseUrl || window.location.origin;
+    state.users = data.users || [];
     state.offers = data.offers || [];
     if (!state.activeOfferId && state.offers[0]) state.activeOfferId = state.offers[0].id;
     if (!state.offers.some((offer) => offer.id === state.activeOfferId) && state.offers[0]) {
@@ -94,7 +98,9 @@ async function bootstrap() {
 
 function renderApp(data = {}) {
   renderOfferSelect();
+  renderOfferOwnerSelect();
   renderOverview(data);
+  renderUsers();
   if (state.activeView === 'offer') renderOfferPanel();
   if (state.activeView === 'integrations') renderSettingsForm();
   if (state.activeView === 'docs') renderDocs();
@@ -110,6 +116,7 @@ function renderOfferSelect() {
 
 function renderOverview(data = {}) {
   const stats = data.stats || {};
+  $('#m-users').textContent = stats.users || 0;
   $('#m-offers').textContent = stats.offers || 0;
   $('#m-leads').textContent = stats.leads || 0;
   $('#m-events').textContent = stats.events || 0;
@@ -152,11 +159,46 @@ function renderOverview(data = {}) {
   }).join('');
 }
 
+function renderUsers() {
+  const table = $('#users-table');
+  if (!table) return;
+  $('#users-table-count').textContent = state.users.length;
+  table.innerHTML = state.users.map((user) => {
+    const st = user.stats || {};
+    return `
+      <tr>
+        <td><strong>${escapeHtml(user.name || '-')}</strong><br><span class="muted">${escapeHtml(user.email || '-')}</span></td>
+        <td>${escapeHtml(user.plan || '-')}<br><span class="muted">${escapeHtml(user.status || '-')}</span></td>
+        <td>${st.offers || 0}</td>
+        <td>${st.leads || 0}</td>
+        <td>${money(st.revenue || 0)}</td>
+      </tr>
+    `;
+  }).join('') || '<tr><td colspan="5">Nenhum usuario cadastrado.</td></tr>';
+}
+
+function renderOfferOwnerSelect() {
+  const select = $('#offer-owner-select');
+  if (!select) return;
+  select.innerHTML = [
+    '<option value="">Sem usuario dono</option>',
+    ...state.users.map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name)} - ${escapeHtml(user.email)}</option>`)
+  ].join('');
+}
+
 async function renderOfferPanel() {
   const offer = activeOffer();
   if (!offer) return;
+  const st = offer.stats || {};
+  $('#offer-m-leads').textContent = st.leads || 0;
+  $('#offer-m-events').textContent = st.events || 0;
+  $('#offer-m-pix').textContent = st.transactions || 0;
+  $('#offer-m-paid').textContent = st.paid || 0;
+  $('#offer-m-conversion').textContent = `${st.conversion || 0}%`;
+  $('#offer-m-revenue').textContent = money(st.revenue || 0);
   $('#offer-name').textContent = offer.name;
   $('#offer-description').textContent = offer.description || 'Oferta sem descricao.';
+  $('#offer-owner').value = offer.owner ? `${offer.owner.name} - ${offer.owner.email}` : 'Sem usuario dono';
   $('#offer-public-key').value = offer.publicKey || '';
   $('#offer-id').value = offer.id || '';
   $('#offer-slug').value = offer.slug || '';
@@ -497,6 +539,19 @@ function bindEvents() {
     event.currentTarget.reset();
     await bootstrap();
     setView('offer');
+  });
+
+  $('#create-user-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const data = Object.fromEntries(form.entries());
+    await api('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+    event.currentTarget.reset();
+    await bootstrap();
+    setView('users');
   });
 
   $$('.tab').forEach((tab) => tab.addEventListener('click', () => renderOfferCollection(tab.dataset.offerTab)));

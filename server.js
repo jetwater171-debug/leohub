@@ -156,6 +156,7 @@ function createEmptyStore() {
       masterToken,
       sessions: []
     },
+    users: [],
     offers: [],
     leads: [],
     events: [],
@@ -267,6 +268,7 @@ function normalizeRemoteStore(rawState = {}) {
     offers: Array.isArray(source.offers) ? source.offers : [],
     leads: Array.isArray(source.leads) ? source.leads : [],
     events: Array.isArray(source.events) ? source.events : [],
+    users: Array.isArray(source.users) ? source.users : [],
     pageviews: Array.isArray(source.pageviews) ? source.pageviews : [],
     transactions: Array.isArray(source.transactions) ? source.transactions : [],
     webhooks: Array.isArray(source.webhooks) ? source.webhooks : [],
@@ -339,10 +341,38 @@ function publicOffer(offer) {
   };
 }
 
+function publicUser(user) {
+  if (!user) return null;
+  const offers = STORE.offers.filter((offer) => offer.ownerId === user.id);
+  const offerIds = offers.map((offer) => offer.id);
+  const leads = STORE.leads.filter((lead) => offerIds.includes(lead.offerId));
+  const transactions = STORE.transactions.filter((tx) => offerIds.includes(tx.offerId));
+  const paid = transactions.filter((tx) => tx.status === 'paid');
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    status: user.status,
+    plan: user.plan,
+    notes: user.notes,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    stats: {
+      offers: offers.length,
+      leads: leads.length,
+      transactions: transactions.length,
+      paid: paid.length,
+      revenue: Number(paid.reduce((sum, tx) => sum + Number(tx.amount || 0), 0).toFixed(2))
+    }
+  };
+}
+
 function adminOffer(offer) {
   if (!offer) return null;
+  const owner = STORE.users.find((user) => user.id === offer.ownerId) || null;
   return {
     ...clone(offer),
+    owner: owner ? publicUser(owner) : null,
     stats: buildOfferStats(offer.id)
   };
 }
@@ -386,6 +416,11 @@ function findOfferByKey(key = '') {
 function findOfferById(idOrSlug = '') {
   const value = toText(idOrSlug, 200);
   return STORE.offers.find((offer) => offer.id === value || offer.slug === value) || null;
+}
+
+function findUserById(idOrEmail = '') {
+  const value = toText(idOrEmail, 200).toLowerCase();
+  return STORE.users.find((user) => user.id === value || String(user.email || '').toLowerCase() === value) || null;
 }
 
 function getBearer(req) {
@@ -538,6 +573,7 @@ function normalizeOfferInput(input = {}, existing = null) {
   }
   return {
     id: existing?.id || id('offer'),
+    ownerId: toText(input.ownerId || input.owner_id || existing?.ownerId || '', 120),
     slug: slugBase,
     name,
     status: toText(input.status || existing?.status || 'active', 30),
@@ -545,6 +581,21 @@ function normalizeOfferInput(input = {}, existing = null) {
     publicKey: existing?.publicKey || randomToken('lh_pub'),
     privateKey: existing?.privateKey || randomToken('lh_sec'),
     settings,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  };
+}
+
+function normalizeUserInput(input = {}, existing = null) {
+  const now = nowIso();
+  const email = toText(input.email || existing?.email || '', 180).toLowerCase();
+  return {
+    id: existing?.id || id('user'),
+    name: toText(input.name || existing?.name || 'Novo usuario', 160),
+    email,
+    status: toText(input.status || existing?.status || 'active', 40),
+    plan: toText(input.plan || existing?.plan || 'interno', 80),
+    notes: toText(input.notes || existing?.notes || '', 1000),
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
@@ -1407,6 +1458,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       baseUrl: BASE_URL,
       defaultPassword: ADMIN_PASSWORD === 'admin',
+      users: STORE.users.map(publicUser),
       offers: STORE.offers.map(adminOffer),
       stats: buildGlobalStats(),
       recentEvents: STORE.events.slice(-20).reverse(),
@@ -1417,6 +1469,40 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/admin/offers' && req.method === 'GET') {
     if (!requireAdmin(req, res)) return;
     sendJson(res, 200, { ok: true, offers: STORE.offers.map(adminOffer) });
+    return;
+  }
+  if (pathname === '/api/admin/users' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return;
+    sendJson(res, 200, { ok: true, users: STORE.users.map(publicUser) });
+    return;
+  }
+  if (pathname === '/api/admin/users' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return;
+    const body = await readJson(req);
+    const incoming = normalizeUserInput(body);
+    if (!incoming.email) return sendJson(res, 400, { ok: false, error: 'missing_email' });
+    if (STORE.users.some((user) => String(user.email || '').toLowerCase() === incoming.email)) {
+      return sendJson(res, 409, { ok: false, error: 'email_already_exists' });
+    }
+    writeStore((store) => {
+      store.users.push(incoming);
+    });
+    sendJson(res, 201, { ok: true, user: publicUser(incoming) });
+    return;
+  }
+  const userMatch = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+  if (userMatch && req.method === 'PATCH') {
+    if (!requireAdmin(req, res)) return;
+    const body = await readJson(req);
+    let updated = null;
+    writeStore((store) => {
+      const index = store.users.findIndex((user) => user.id === decodeURIComponent(userMatch[1]));
+      if (index < 0) return;
+      updated = normalizeUserInput(body, store.users[index]);
+      store.users[index] = updated;
+    });
+    if (!updated) return sendJson(res, 404, { ok: false, error: 'user_not_found' });
+    sendJson(res, 200, { ok: true, user: publicUser(updated) });
     return;
   }
   if (pathname === '/api/admin/offers' && req.method === 'POST') {
@@ -1571,6 +1657,7 @@ async function handleApi(req, res, pathname) {
 function buildGlobalStats() {
   const paid = STORE.transactions.filter((item) => item.status === 'paid');
   return {
+    users: STORE.users.length,
     offers: STORE.offers.length,
     leads: STORE.leads.length,
     events: STORE.events.length,
@@ -1603,8 +1690,31 @@ async function handleRequest(req, res) {
 }
 
 function ensureSeedOffer() {
+  if (!STORE.users.length) {
+    const user = normalizeUserInput({
+      name: 'Operacao LEOHUB',
+      email: 'admin@leohub.local',
+      plan: 'interno',
+      notes: 'Usuario master local criado automaticamente.'
+    });
+    writeStore((store) => {
+      store.users.push(user);
+    });
+  }
+  const defaultOwner = STORE.users[0] || null;
+  if (defaultOwner && STORE.offers.some((offer) => !offer.ownerId)) {
+    writeStore((store) => {
+      store.offers.forEach((offer) => {
+        if (!offer.ownerId) {
+          offer.ownerId = defaultOwner.id;
+          offer.updatedAt = nowIso();
+        }
+      });
+    });
+  }
   if (STORE.offers.length) return;
   const offer = normalizeOfferInput({
+    ownerId: defaultOwner?.id || '',
     name: 'Oferta Demo',
     slug: 'oferta-demo',
     description: 'Oferta inicial para testar tracking, PIX e integrações.',

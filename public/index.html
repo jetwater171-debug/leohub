@@ -13,13 +13,14 @@
         <span class="brand-mark">LH</span>
         <div>
           <strong>LEOHUB</strong>
-          <small>Core de ofertas</small>
+          <small>Admin central</small>
         </div>
       </div>
       <nav class="nav">
         <button class="nav-item is-active" data-view="overview" type="button">Visao geral</button>
+        <button class="nav-item" data-view="users" type="button">Usuarios</button>
         <button class="nav-item" data-view="offers" type="button">Ofertas</button>
-        <button class="nav-item" data-view="offer" type="button">Painel da oferta</button>
+        <button class="nav-item" data-view="offer" type="button">Admin da oferta</button>
         <button class="nav-item" data-view="integrations" type="button">Integracoes</button>
         <button class="nav-item" data-view="docs" type="button">Documentacao</button>
       </nav>
@@ -31,17 +32,28 @@
 
     <main class="main">
       <section id="login-screen" class="login-screen">
-        <form id="login-form" class="login-box">
-          <span class="eyebrow">Acesso master</span>
-          <h1>LEOHUB</h1>
-          <p>Entre para criar ofertas, gerar credenciais e operar tracking, PIX e integracoes.</p>
-          <label>
-            Senha do admin
-            <input id="admin-password" type="password" autocomplete="current-password" placeholder="admin">
-          </label>
-          <button class="primary" type="submit">Entrar</button>
-          <span id="login-error" class="error"></span>
-        </form>
+        <div class="login-layout">
+          <div class="login-copy">
+            <span class="eyebrow">LEOHUB OS</span>
+            <h1>Controle total das suas ofertas.</h1>
+            <p>Admin master para PIX multigateway, tracking, CAPI, UTMify, Pushcut e funis plugados por credencial.</p>
+            <div class="login-stats">
+              <span>Multi-oferta</span>
+              <span>API-first</span>
+              <span>Supabase ready</span>
+            </div>
+          </div>
+          <form id="login-form" class="login-box">
+            <span class="eyebrow">Acesso admin</span>
+            <h2>Entrar na LEOHUB</h2>
+            <label>
+              Senha do admin
+              <input id="admin-password" type="password" autocomplete="current-password" placeholder="Digite sua senha">
+            </label>
+            <button class="primary" type="submit">Entrar no painel</button>
+            <span id="login-error" class="error"></span>
+          </form>
+        </div>
       </section>
 
       <section id="app-screen" class="app-screen hidden">
@@ -63,6 +75,7 @@
 
         <div id="view-overview" class="view">
           <div class="metric-grid">
+            <article class="metric"><span>Usuarios</span><strong id="m-users">0</strong></article>
             <article class="metric"><span>Ofertas</span><strong id="m-offers">0</strong></article>
             <article class="metric"><span>Leads</span><strong id="m-leads">0</strong></article>
             <article class="metric"><span>Eventos</span><strong id="m-events">0</strong></article>
@@ -89,6 +102,64 @@
           </div>
         </div>
 
+        <div id="view-users" class="view hidden">
+          <div class="split">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Criar usuario</h2>
+                <span class="pill">cliente / operador</span>
+              </div>
+              <form id="create-user-form" class="form-grid">
+                <label>
+                  Nome
+                  <input name="name" placeholder="Ex: Cliente Premium" required>
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" placeholder="cliente@email.com" required>
+                </label>
+                <label>
+                  Plano
+                  <input name="plan" placeholder="Ex: 2k mensal">
+                </label>
+                <label>
+                  Status
+                  <select name="status">
+                    <option value="active">Ativo</option>
+                    <option value="paused">Pausado</option>
+                    <option value="trial">Teste</option>
+                  </select>
+                </label>
+                <label class="wide">
+                  Observacoes
+                  <textarea name="notes" rows="3" placeholder="Notas internas desse usuario"></textarea>
+                </label>
+                <button class="primary wide" type="submit">Criar usuario</button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Usuarios LEOHUB</h2>
+                <span id="users-table-count" class="pill">0</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Usuario</th>
+                      <th>Plano</th>
+                      <th>Ofertas</th>
+                      <th>Leads</th>
+                      <th>Receita</th>
+                    </tr>
+                  </thead>
+                  <tbody id="users-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+
         <div id="view-offers" class="view hidden">
           <div class="split">
             <section class="panel">
@@ -97,6 +168,10 @@
                 <span class="pill">token automatico</span>
               </div>
               <form id="create-offer-form" class="form-grid">
+                <label class="wide">
+                  Usuario dono
+                  <select name="ownerId" id="offer-owner-select"></select>
+                </label>
                 <label>
                   Nome da oferta
                   <input name="name" placeholder="Ex: Oferta Bag Premium" required>
@@ -136,6 +211,14 @@
         </div>
 
         <div id="view-offer" class="view hidden">
+          <div class="offer-admin-grid">
+            <article class="metric"><span>Leads</span><strong id="offer-m-leads">0</strong></article>
+            <article class="metric"><span>Eventos</span><strong id="offer-m-events">0</strong></article>
+            <article class="metric"><span>PIX</span><strong id="offer-m-pix">0</strong></article>
+            <article class="metric"><span>Pagos</span><strong id="offer-m-paid">0</strong></article>
+            <article class="metric"><span>Conversao</span><strong id="offer-m-conversion">0%</strong></article>
+            <article class="metric"><span>Receita</span><strong id="offer-m-revenue">R$ 0,00</strong></article>
+          </div>
           <section class="panel">
             <div class="panel-head">
               <div>
@@ -148,6 +231,10 @@
               </div>
             </div>
             <div class="key-grid">
+              <label>
+                Usuario dono
+                <input id="offer-owner" readonly>
+              </label>
               <label>
                 Credencial publica
                 <input id="offer-public-key" readonly>
