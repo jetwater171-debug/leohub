@@ -510,6 +510,15 @@ td {
   vertical-align: top;
 }
 
+td code {
+  display: inline-block;
+  max-width: 420px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #bfe4ff;
+}
+
 th {
   color: var(--muted);
   font-size: 11px;
@@ -526,6 +535,7 @@ tr:last-child td {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 18px 0 12px;
   overflow: auto;

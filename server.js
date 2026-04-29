@@ -87,6 +87,7 @@ function defaultGatewayConfig() {
     timeoutMs: 12000,
     mockMode: true,
     baseUrl: '',
+    postbackUrl: '',
     apiKey: '',
     apiSecret: '',
     apiToken: '',
@@ -95,7 +96,17 @@ function defaultGatewayConfig() {
     basicAuthBase64: '',
     offerHash: '',
     productHash: '',
-    webhookToken: randomToken('lh_wh')
+    orderbumpHash: '',
+    source: '',
+    description: '',
+    iofOfferHash: '',
+    iofProductHash: '',
+    correiosOfferHash: '',
+    correiosProductHash: '',
+    expressoOfferHash: '',
+    expressoProductHash: '',
+    webhookToken: randomToken('lh_wh'),
+    webhookTokenRequired: true
   };
 }
 
@@ -120,8 +131,22 @@ function defaultOfferSettings() {
     meta: {
       enabled: false,
       pixelId: '',
+      backupPixelId: '',
       accessToken: '',
+      backupAccessToken: '',
       testEventCode: '',
+      backupTestEventCode: '',
+      events: {
+        page_view: true,
+        view_content: true,
+        lead: true,
+        checkout: true,
+        purchase: true
+      }
+    },
+    tiktok: {
+      enabled: false,
+      pixelId: '',
       events: {
         page_view: true,
         lead: true,
@@ -133,15 +158,50 @@ function defaultOfferSettings() {
       enabled: false,
       endpoint: 'https://api.utmify.com.br/api-credentials/orders',
       apiKey: '',
-      platform: 'LEOHUB'
+      platform: 'LEOHUB',
+      sendPixCreated: true,
+      sendPixConfirmed: true,
+      sendRefunds: true
     },
     pushcut: {
       enabled: false,
+      apiKey: '',
+      pixCreatedNotification: '',
+      pixConfirmedNotification: '',
       pixCreatedUrl: '',
-      pixConfirmedUrl: ''
+      pixConfirmedUrl: '',
+      templates: {
+        pixCreatedTitle: 'PIX gerado - {amount}',
+        pixCreatedMessage: '{offerName} | {name} | {gateway} | {txid}',
+        pixConfirmedTitle: 'PIX pago - {amount}',
+        pixConfirmedMessage: '{offerName} | {name} | {gateway} | {txid}'
+      }
+    },
+    tracking: {
+      firstTouch: true,
+      captureFbclid: true,
+      captureTtclid: true,
+      captureGclid: true,
+      sourceBasedRouting: true
+    },
+    pages: {
+      enabled: true,
+      home: '',
+      checkout: '',
+      pix: '',
+      success: ''
+    },
+    audience: {
+      paidOnly: true,
+      minRevenueForInsight: 1
+    },
+    backredirects: {
+      enabled: false,
+      urls: []
     },
     publicConfig: {
       pixelEnabled: false,
+      tiktokPixelEnabled: false,
       custom: {}
     }
   };
@@ -341,6 +401,33 @@ function publicOffer(offer) {
   };
 }
 
+function publicOfferConfig(offer) {
+  const settings = offer.settings || {};
+  return {
+    ...(settings.publicConfig || {}),
+    metaPixel: settings.meta?.enabled && settings.meta?.pixelId
+      ? {
+          enabled: true,
+          pixelId: settings.meta.pixelId,
+          backupPixelId: settings.meta.backupPixelId || '',
+          events: settings.meta.events || {}
+        }
+      : { enabled: false },
+    tiktokPixel: settings.tiktok?.enabled && settings.tiktok?.pixelId
+      ? {
+          enabled: true,
+          pixelId: settings.tiktok.pixelId,
+          events: settings.tiktok.events || {}
+        }
+      : { enabled: false },
+    pages: settings.pages || {},
+    backredirects: {
+      enabled: settings.backredirects?.enabled === true,
+      urls: Array.isArray(settings.backredirects?.urls) ? settings.backredirects.urls : []
+    }
+  };
+}
+
 function publicUser(user) {
   if (!user) return null;
   const offers = STORE.offers.filter((offer) => offer.ownerId === user.id);
@@ -373,7 +460,8 @@ function adminOffer(offer) {
   return {
     ...clone(offer),
     owner: owner ? publicUser(owner) : null,
-    stats: buildOfferStats(offer.id)
+    stats: buildOfferStats(offer.id),
+    insights: buildOfferInsights(offer.id)
   };
 }
 
@@ -404,6 +492,48 @@ function buildOfferStats(offerId) {
       .filter(Boolean)
       .sort()
       .at(-1) || ''
+  };
+}
+
+function buildOfferInsights(offerId) {
+  const leads = STORE.leads.filter((item) => item.offerId === offerId);
+  const events = STORE.events.filter((item) => item.offerId === offerId);
+  const transactions = STORE.transactions.filter((item) => item.offerId === offerId);
+  const paid = transactions.filter((item) => item.status === 'paid');
+  const byGateway = {};
+  const bySource = {};
+  const byStage = {};
+  const byPage = {};
+
+  for (const tx of transactions) {
+    const key = tx.gateway || 'unknown';
+    byGateway[key] = byGateway[key] || { generated: 0, paid: 0, revenue: 0 };
+    byGateway[key].generated += 1;
+    if (tx.status === 'paid') {
+      byGateway[key].paid += 1;
+      byGateway[key].revenue = Number((byGateway[key].revenue + Number(tx.amount || 0)).toFixed(2));
+    }
+  }
+
+  for (const lead of leads) {
+    const source = pickText(lead.utm?.utm_source, lead.utm?.src, lead.referrer, 'direto');
+    bySource[source] = (bySource[source] || 0) + 1;
+    const stage = pickText(lead.stage, lead.lastEvent, 'sem_etapa');
+    byStage[stage] = (byStage[stage] || 0) + 1;
+  }
+
+  for (const event of events) {
+    const page = pickText(event.page, event.stage, event.event, 'evento');
+    byPage[page] = (byPage[page] || 0) + 1;
+  }
+
+  return {
+    gatewayStats: byGateway,
+    sourceStats: bySource,
+    stageStats: byStage,
+    pageStats: byPage,
+    paidLeads: paid.length,
+    revenue: Number(paid.reduce((sum, tx) => sum + Number(tx.amount || 0), 0).toFixed(2))
   };
 }
 
@@ -569,6 +699,48 @@ function normalizeOfferInput(input = {}, existing = null) {
       ...defaultGatewayConfig(),
       ...asObject(existing?.settings?.payments?.gateways?.[gateway]),
       ...asObject(input.settings?.payments?.gateways?.[gateway])
+    };
+  }
+  settings.meta = {
+    ...defaultOfferSettings().meta,
+    ...asObject(existing?.settings?.meta),
+    ...asObject(input.settings?.meta),
+    events: {
+      ...defaultOfferSettings().meta.events,
+      ...asObject(existing?.settings?.meta?.events),
+      ...asObject(input.settings?.meta?.events)
+    }
+  };
+  settings.tiktok = {
+    ...defaultOfferSettings().tiktok,
+    ...asObject(existing?.settings?.tiktok),
+    ...asObject(input.settings?.tiktok),
+    events: {
+      ...defaultOfferSettings().tiktok.events,
+      ...asObject(existing?.settings?.tiktok?.events),
+      ...asObject(input.settings?.tiktok?.events)
+    }
+  };
+  settings.utmify = {
+    ...defaultOfferSettings().utmify,
+    ...asObject(existing?.settings?.utmify),
+    ...asObject(input.settings?.utmify)
+  };
+  settings.pushcut = {
+    ...defaultOfferSettings().pushcut,
+    ...asObject(existing?.settings?.pushcut),
+    ...asObject(input.settings?.pushcut),
+    templates: {
+      ...defaultOfferSettings().pushcut.templates,
+      ...asObject(existing?.settings?.pushcut?.templates),
+      ...asObject(input.settings?.pushcut?.templates)
+    }
+  };
+  for (const section of ['tracking', 'pages', 'audience', 'backredirects', 'publicConfig', 'features']) {
+    settings[section] = {
+      ...asObject(defaultOfferSettings()[section]),
+      ...asObject(existing?.settings?.[section]),
+      ...asObject(input.settings?.[section])
     };
   }
   return {
@@ -1096,6 +1268,33 @@ function mapPaymentStatus(statusRaw = '') {
   return 'waiting_payment';
 }
 
+function toUtmifyDate(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return toUtmifyDate();
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const hh = String(date.getUTCHours()).padStart(2, '0');
+  const mi = String(date.getUTCMinutes()).padStart(2, '0');
+  const ss = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function buildTrackingParameters(...sources) {
+  const out = {};
+  const keys = ['src', 'sck', 'utm_source', 'utm_campaign', 'utm_medium', 'utm_content', 'utm_term', 'fbclid', 'gclid', 'ttclid'];
+  for (const source of sources) {
+    const obj = asObject(source);
+    for (const key of keys) {
+      if (!out[key] && obj[key]) out[key] = toText(obj[key], 500);
+    }
+  }
+  for (const key of keys) {
+    if (!out[key]) out[key] = null;
+  }
+  return out;
+}
+
 function sanitizeSecrets(value) {
   const copy = clone(value || {});
   const redact = (obj) => {
@@ -1189,11 +1388,13 @@ function scheduleDispatches(offer, eventName, payload = {}, req = null) {
   if (offer.settings?.features?.dispatch === false) return;
   const jobs = [];
   if (shouldSendUtmify(offer, eventName)) {
+    const txid = pickText(payload.transaction?.txid, payload.txid, payload.lead?.pixTxid, payload.sessionId);
     jobs.push({
       id: id('job'),
       offerId: offer.id,
       channel: 'utmify',
       eventName,
+      dedupeKey: `utmify:${offer.id}:${eventName}:${txid || id('event')}`,
       status: 'pending',
       payload: buildUtmifyPayload(offer, eventName, payload),
       createdAt: nowIso(),
@@ -1201,11 +1402,13 @@ function scheduleDispatches(offer, eventName, payload = {}, req = null) {
     });
   }
   if (shouldSendPushcut(offer, eventName)) {
+    const txid = pickText(payload.transaction?.txid, payload.txid, payload.lead?.pixTxid, payload.sessionId);
     jobs.push({
       id: id('job'),
       offerId: offer.id,
       channel: 'pushcut',
       eventName,
+      dedupeKey: `pushcut:${offer.id}:${eventName}:${txid || id('event')}`,
       status: 'pending',
       payload: buildPushcutPayload(offer, eventName, payload),
       createdAt: nowIso(),
@@ -1213,11 +1416,13 @@ function scheduleDispatches(offer, eventName, payload = {}, req = null) {
     });
   }
   if (shouldSendMeta(offer, eventName)) {
+    const txid = pickText(payload.transaction?.txid, payload.txid, payload.lead?.pixTxid, payload.sessionId);
     jobs.push({
       id: id('job'),
       offerId: offer.id,
       channel: 'meta',
       eventName,
+      dedupeKey: `meta:${offer.id}:${eventName}:${txid || payload.eventId || payload.lead?.sessionId || id('event')}`,
       status: 'pending',
       payload: buildMetaPayload(offer, eventName, payload, req),
       createdAt: nowIso(),
@@ -1225,21 +1430,28 @@ function scheduleDispatches(offer, eventName, payload = {}, req = null) {
     });
   }
   if (!jobs.length) return;
+  const filtered = jobs.filter((job) => !job.dedupeKey || !STORE.dispatches.some((item) => item.dedupeKey === job.dedupeKey));
+  if (!filtered.length) return;
   writeStore((store) => {
-    store.dispatches.push(...jobs);
+    store.dispatches.push(...filtered);
   });
   processDispatchQueue().catch(() => null);
 }
 
 function shouldSendUtmify(offer, eventName) {
-  return Boolean(offer.settings?.utmify?.enabled && ['pix_created', 'pix_confirmed', 'pix_refunded', 'pix_refused', 'purchase'].includes(eventName));
+  const cfg = offer.settings?.utmify || {};
+  if (!cfg.enabled) return false;
+  if (eventName === 'pix_created') return cfg.sendPixCreated !== false;
+  if (eventName === 'pix_confirmed' || eventName === 'purchase') return cfg.sendPixConfirmed !== false;
+  if (eventName === 'pix_refunded' || eventName === 'pix_refused') return cfg.sendRefunds !== false;
+  return false;
 }
 
 function shouldSendPushcut(offer, eventName) {
   const push = offer.settings?.pushcut || {};
   if (!push.enabled) return false;
-  if (eventName === 'pix_created') return Boolean(push.pixCreatedUrl);
-  if (eventName === 'pix_confirmed') return Boolean(push.pixConfirmedUrl);
+  if (eventName === 'pix_created') return Boolean(push.pixCreatedUrl || (push.apiKey && push.pixCreatedNotification));
+  if (eventName === 'pix_confirmed') return Boolean(push.pixConfirmedUrl || (push.apiKey && push.pixConfirmedNotification));
   return false;
 }
 
@@ -1257,6 +1469,8 @@ function buildUtmifyPayload(offer, eventName, payload = {}) {
   const tx = payload.transaction || {};
   const lead = payload.lead || {};
   const personal = asObject(lead.payload?.personal || lead.payload?.customer || payload.customer || {});
+  const shipping = asObject(lead.payload?.shipping || payload.shipping);
+  const items = Array.isArray(payload.items) ? payload.items : [];
   const amount = toAmount(payload.amount || tx.amount || lead.pixAmount || 0);
   const status = eventName === 'pix_confirmed' || eventName === 'purchase'
     ? 'paid'
@@ -1270,21 +1484,31 @@ function buildUtmifyPayload(offer, eventName, payload = {}) {
     platform: offer.settings?.utmify?.platform || 'LEOHUB',
     paymentMethod: 'pix',
     status,
-    createdAt: tx.createdAt || nowIso(),
-    approvedDate: status === 'paid' ? nowIso() : null,
-    refundedAt: status === 'refunded' ? nowIso() : null,
+    createdAt: toUtmifyDate(tx.createdAt || lead.createdAt),
+    approvedDate: status === 'paid' ? toUtmifyDate(tx.updatedAt || payload.statusChangedAt) : null,
+    refundedAt: status === 'refunded' ? toUtmifyDate(tx.updatedAt || payload.statusChangedAt) : null,
     customer: {
       name: personal.name || lead.name || 'Cliente',
-      email: personal.email || lead.email || '',
-      phone: personal.phone || personal.phoneDigits || lead.phone || '',
-      document: personal.document || personal.cpf || lead.document || ''
+      email: personal.email || lead.email || `lead.${onlyDigits(lead.sessionId || tx.txid || Date.now(), 16)}@leohub.local`,
+      phone: personal.phone || personal.phoneDigits || lead.phone || null,
+      document: personal.document || personal.cpf || lead.document || null,
+      country: 'BR',
+      ip: lead.clientIp || payload.clientIp || null
     },
-    trackingParameters: lead.utm || payload.utm || {},
-    products: [
+    trackingParameters: buildTrackingParameters(lead.utm, payload.utm, lead.payload?.utm, payload.trackingParameters),
+    products: items.length ? items.map((item, index) => ({
+      id: item.id || item.productHash || `${offer.slug}_${index + 1}`,
+      name: item.title || item.name || offer.name,
+      planId: offer.id,
+      planName: offer.name,
+      quantity: Number(item.quantity || 1),
+      priceInCents: cents(item.price || item.amount || amount)
+    })) : [
       {
         id: offer.slug,
-        name: offer.name,
+        name: shipping.name || offer.name,
         planId: offer.id,
+        planName: offer.name,
         quantity: 1,
         priceInCents: cents(amount)
       }
@@ -1300,17 +1524,27 @@ function buildUtmifyPayload(offer, eventName, payload = {}) {
 function buildPushcutPayload(offer, eventName, payload = {}) {
   const tx = payload.transaction || {};
   const lead = payload.lead || {};
+  const amount = toAmount(payload.amount || tx.amount || 0);
   return {
     title: eventName === 'pix_confirmed' ? `PIX pago - ${offer.name}` : `PIX gerado - ${offer.name}`,
-    text: `${lead.name || 'Lead'} | R$ ${toAmount(payload.amount || tx.amount || 0).toFixed(2)} | ${tx.gateway || payload.gateway || ''}`,
+    text: `${lead.name || 'Lead'} | ${amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | ${tx.gateway || payload.gateway || ''}`,
     input: {
       offerId: offer.id,
       offerName: offer.name,
       txid: tx.txid || payload.txid || '',
-      amount: toAmount(payload.amount || tx.amount || 0),
+      amount,
+      name: lead.name || lead.email || 'Lead',
+      gateway: tx.gateway || payload.gateway || '',
       eventName
     }
   };
+}
+
+function templateText(template = '', data = {}) {
+  return String(template || '').replace(/\{\{?\s*([a-zA-Z0-9_]+)\s*\}?\}/g, (_all, key) => {
+    const value = data[key];
+    return value === undefined || value === null ? '' : String(value);
+  });
 }
 
 function buildMetaPayload(offer, eventName, payload = {}, req = null) {
@@ -1394,12 +1628,45 @@ async function sendUtmify(offer, payload) {
 
 async function sendPushcut(offer, eventName, payload) {
   const cfg = offer?.settings?.pushcut || {};
-  const url = eventName === 'pix_confirmed' ? cfg.pixConfirmedUrl : cfg.pixCreatedUrl;
-  if (!cfg.enabled || !url) return { ok: true, skipped: true, reason: 'pushcut_disabled' };
+  if (!cfg.enabled) return { ok: true, skipped: true, reason: 'pushcut_disabled' };
+  const isPaid = eventName === 'pix_confirmed';
+  const url = isPaid ? cfg.pixConfirmedUrl : cfg.pixCreatedUrl;
+  const notification = isPaid ? cfg.pixConfirmedNotification : cfg.pixCreatedNotification;
+  const apiKey = toText(cfg.apiKey, 500);
+  const dataMap = {
+    offerName: offer?.name || '',
+    amount: Number(payload?.input?.amount || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+    name: payload?.input?.name || '',
+    gateway: payload?.input?.gateway || '',
+    txid: payload?.input?.txid || ''
+  };
+  const templates = cfg.templates || {};
+  const body = {
+    ...payload,
+    title: templateText(isPaid ? templates.pixConfirmedTitle : templates.pixCreatedTitle, dataMap) || payload.title,
+    text: templateText(isPaid ? templates.pixConfirmedMessage : templates.pixCreatedMessage, dataMap) || payload.text
+  };
+  if (apiKey && notification) {
+    const endpoint = `https://api.pushcut.io/v1/notifications/${encodeURIComponent(notification)}`;
+    const { response, data } = await fetchJson(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'API-Key': apiKey
+      },
+      body: JSON.stringify({
+        title: body.title,
+        text: body.text,
+        input: body.input || payload
+      })
+    }, 10000);
+    return response.ok ? { ok: true, data } : { ok: false, status: response.status, data };
+  }
+  if (!url) return { ok: true, skipped: true, reason: 'pushcut_missing_target' };
   const { response, data } = await fetchJson(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(body)
   }, 10000);
   return response.ok ? { ok: true, data } : { ok: false, status: response.status, data };
 }
@@ -1575,7 +1842,7 @@ async function handleApi(req, res, pathname) {
     sendJson(res, 200, {
       ok: true,
       offer: publicOffer(offer),
-      config: offer.settings?.publicConfig || {},
+      config: publicOfferConfig(offer),
       features: offer.settings?.features || {}
     });
     return;

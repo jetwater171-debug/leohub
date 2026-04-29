@@ -4,7 +4,7 @@ const state = {
   offers: [],
   activeOfferId: localStorage.getItem('leohub.active.offer') || '',
   activeView: 'overview',
-  activeOfferTab: 'leads',
+  activeOfferTab: 'overview',
   baseUrl: window.location.origin
 };
 
@@ -210,11 +210,26 @@ async function renderOfferCollection(collection) {
   if (!offer) return;
   state.activeOfferTab = collection;
   $$('.tab').forEach((tab) => tab.classList.toggle('is-active', tab.dataset.offerTab === collection));
+  const virtualRenderers = {
+    overview: renderOfferOverviewTable,
+    sales: renderSalesTable,
+    gateways: renderGatewayPanel,
+    tracking: renderTrackingPanel,
+    utmify: renderUtmifyPanel,
+    pages: renderPagesPanel,
+    audience: renderAudiencePanel,
+    backredirects: renderBackredirectPanel
+  };
+  if (virtualRenderers[collection]) {
+    await virtualRenderers[collection](offer);
+    return;
+  }
   const labels = {
     leads: 'Leads',
     events: 'Eventos',
     transactions: 'PIX',
-    dispatches: 'Fila'
+    dispatches: 'Fila',
+    webhooks: 'Webhooks'
   };
   $('#offer-table-title').textContent = labels[collection] || collection;
   const data = await api(`/api/admin/offers/${encodeURIComponent(offer.id)}/${collection}`);
@@ -224,9 +239,48 @@ async function renderOfferCollection(collection) {
     leads: renderLeadsTable,
     events: renderEventsTable,
     transactions: renderTransactionsTable,
-    dispatches: renderDispatchesTable
+    dispatches: renderDispatchesTable,
+    webhooks: renderWebhooksTable
   };
   renderers[collection](rows);
+}
+
+function objEntries(obj = {}) {
+  return Object.entries(obj || {}).sort((a, b) => {
+    const av = typeof a[1] === 'object' ? (a[1].revenue || a[1].paid || a[1].generated || 0) : a[1];
+    const bv = typeof b[1] === 'object' ? (b[1].revenue || b[1].paid || b[1].generated || 0) : b[1];
+    return Number(bv || 0) - Number(av || 0);
+  });
+}
+
+function renderOfferOverviewTable(offer) {
+  const insights = offer.insights || {};
+  $('#offer-table-title').textContent = 'Resumo da oferta';
+  $('#offer-table-count').textContent = 'ao vivo';
+  $('#offer-table-head').innerHTML = '<tr><th>Modulo</th><th>Principal</th><th>Detalhe</th><th>Status</th></tr>';
+  const gateway = objEntries(insights.gatewayStats || {})[0];
+  const source = objEntries(insights.sourceStats || {})[0];
+  const stage = objEntries(insights.stageStats || {})[0];
+  const page = objEntries(insights.pageStats || {})[0];
+  const rows = [
+    ['Gateway vencedor', gateway?.[0] || '-', gateway ? `${gateway[1].paid || 0} pagos de ${gateway[1].generated || 0} PIX` : '-', offer.settings?.payments?.activeGateway || '-'],
+    ['Fonte com mais leads', source?.[0] || '-', source ? `${source[1]} leads` : '-', offer.settings?.tracking?.firstTouch ? 'first-touch ativo' : 'normal'],
+    ['Etapa dominante', stage?.[0] || '-', stage ? `${stage[1]} leads` : '-', 'funil'],
+    ['Pagina/evento dominante', page?.[0] || '-', page ? `${page[1]} eventos` : '-', 'tracking'],
+    ['Integrações', 'UTMify / Pushcut / Pixel', [
+      offer.settings?.utmify?.enabled ? 'UTMify ON' : 'UTMify OFF',
+      offer.settings?.pushcut?.enabled ? 'Pushcut ON' : 'Pushcut OFF',
+      offer.settings?.meta?.enabled ? 'Meta ON' : 'Meta OFF'
+    ].join(' | '), 'por oferta']
+  ];
+  $('#offer-table-body').innerHTML = rows.map((row) => `
+    <tr>
+      <td><strong>${escapeHtml(row[0])}</strong></td>
+      <td>${escapeHtml(row[1])}</td>
+      <td>${escapeHtml(row[2])}</td>
+      <td><span class="pill">${escapeHtml(row[3])}</span></td>
+    </tr>
+  `).join('');
 }
 
 function renderLeadsTable(rows) {
@@ -267,6 +321,117 @@ function renderTransactionsTable(rows) {
   `).join('') || '<tr><td colspan="5">Sem PIX ainda.</td></tr>';
 }
 
+async function renderSalesTable(offer) {
+  $('#offer-table-title').textContent = 'Vendas';
+  const data = await api(`/api/admin/offers/${encodeURIComponent(offer.id)}/transactions`);
+  const rows = (data.data || []).filter((tx) => tx.status === 'paid');
+  $('#offer-table-count').textContent = rows.length;
+  $('#offer-table-head').innerHTML = '<tr><th>Venda</th><th>Lead</th><th>Valor</th><th>Gateway</th><th>Pago em</th></tr>';
+  $('#offer-table-body').innerHTML = rows.map((tx) => `
+    <tr>
+      <td><strong>${escapeHtml(tx.txid || '-')}</strong><br><span class="muted">${escapeHtml(tx.statusRaw || '-')}</span></td>
+      <td>${escapeHtml(tx.sessionId || tx.leadId || '-')}</td>
+      <td>${money(tx.amount || 0)}</td>
+      <td>${escapeHtml(tx.gateway || '-')}</td>
+      <td>${dateText(tx.updatedAt || tx.createdAt)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5">Nenhuma venda paga ainda.</td></tr>';
+}
+
+function renderGatewayPanel(offer) {
+  const payments = offer.settings?.payments || {};
+  const gateways = payments.gateways || {};
+  const insights = offer.insights?.gatewayStats || {};
+  $('#offer-table-title').textContent = 'Gateways multigateway';
+  $('#offer-table-count').textContent = Object.keys(gateways).length;
+  $('#offer-table-head').innerHTML = '<tr><th>Gateway</th><th>Operacao</th><th>Credenciais</th><th>Webhook</th><th>Performance</th></tr>';
+  $('#offer-table-body').innerHTML = Object.keys(gatewayNames).map((gateway) => {
+    const cfg = gateways[gateway] || {};
+    const stats = insights[gateway] || {};
+    const hasCredentials = cfg.mockMode || cfg.apiKey || cfg.apiSecret || cfg.apiToken || cfg.secretKey || cfg.basicAuthBase64;
+    const webhookUrl = `${state.baseUrl}/api/v1/webhooks/${gateway}?offer_id=${offer.id}&token=${cfg.webhookToken || 'TOKEN'}`;
+    return `
+      <tr>
+        <td><strong>${gatewayNames[gateway]}</strong><br><span class="muted">${payments.activeGateway === gateway ? 'gateway ativo' : 'fallback'}</span></td>
+        <td>${cfg.enabled ? 'Ativo' : 'Desativado'}<br><span class="muted">${cfg.mockMode ? 'modo teste/mock' : 'modo real'}</span></td>
+        <td>${hasCredentials ? 'Configurado' : 'Pendente'}<br><span class="muted">${escapeHtml(cfg.baseUrl || 'URL padrao')}</span></td>
+        <td><code>${escapeHtml(webhookUrl)}</code></td>
+        <td>${stats.paid || 0} pagos / ${stats.generated || 0} gerados<br><span class="muted">${money(stats.revenue || 0)}</span></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderTrackingPanel(offer) {
+  const meta = offer.settings?.meta || {};
+  const tiktok = offer.settings?.tiktok || {};
+  const tracking = offer.settings?.tracking || {};
+  $('#offer-table-title').textContent = 'Tracking e pixels';
+  $('#offer-table-count').textContent = meta.enabled || tiktok.enabled ? 'ativo' : 'off';
+  $('#offer-table-head').innerHTML = '<tr><th>Area</th><th>Configuracao</th><th>Eventos</th><th>Observacao</th></tr>';
+  const rows = [
+    ['Meta Pixel/CAPI', meta.enabled ? `Pixel ${meta.pixelId || '-'}` : 'Desativado', Object.entries(meta.events || {}).filter(([, v]) => v !== false).map(([k]) => k).join(', '), meta.accessToken ? 'CAPI configurado' : 'sem token CAPI'],
+    ['TikTok Pixel', tiktok.enabled ? `Pixel ${tiktok.pixelId || '-'}` : 'Desativado', Object.entries(tiktok.events || {}).filter(([, v]) => v !== false).map(([k]) => k).join(', '), 'roteamento por origem preparado'],
+    ['Atribuicao', tracking.firstTouch ? 'First-touch ativo' : 'Ultimo toque', ['fbclid', 'ttclid', 'gclid'].filter((k) => tracking[`capture${k[0].toUpperCase()}${k.slice(1)}`] !== false).join(', '), tracking.sourceBasedRouting ? 'envia por origem' : 'sem roteamento por origem']
+  ];
+  $('#offer-table-body').innerHTML = rows.map((row) => `
+    <tr><td><strong>${escapeHtml(row[0])}</strong></td><td>${escapeHtml(row[1])}</td><td>${escapeHtml(row[2])}</td><td>${escapeHtml(row[3])}</td></tr>
+  `).join('');
+}
+
+function renderUtmifyPanel(offer) {
+  const utmify = offer.settings?.utmify || {};
+  const pushcut = offer.settings?.pushcut || {};
+  $('#offer-table-title').textContent = 'UTMify e Pushcut';
+  $('#offer-table-count').textContent = [utmify.enabled && 'UTMify', pushcut.enabled && 'Pushcut'].filter(Boolean).join(' + ') || 'off';
+  $('#offer-table-head').innerHTML = '<tr><th>Canal</th><th>Status</th><th>Destino</th><th>Eventos</th></tr>';
+  const rows = [
+    ['UTMify', utmify.enabled ? 'Ativo' : 'Desativado', utmify.endpoint || '-', [utmify.sendPixCreated !== false && 'PIX gerado', utmify.sendPixConfirmed !== false && 'PIX pago', utmify.sendRefunds !== false && 'reembolso/recusa'].filter(Boolean).join(', ')],
+    ['Pushcut', pushcut.enabled ? 'Ativo' : 'Desativado', pushcut.apiKey ? 'API v1 por notificationName' : 'Webhook URL', [pushcut.pixCreatedNotification || pushcut.pixCreatedUrl || 'PIX gerado pendente', pushcut.pixConfirmedNotification || pushcut.pixConfirmedUrl || 'PIX pago pendente'].join(' | ')]
+  ];
+  $('#offer-table-body').innerHTML = rows.map((row) => `
+    <tr><td><strong>${escapeHtml(row[0])}</strong></td><td>${escapeHtml(row[1])}</td><td>${escapeHtml(row[2])}</td><td>${escapeHtml(row[3])}</td></tr>
+  `).join('');
+}
+
+function renderPagesPanel(offer) {
+  const pages = offer.settings?.pages || {};
+  $('#offer-table-title').textContent = 'Paginas da oferta';
+  $('#offer-table-count').textContent = pages.enabled ? 'ativo' : 'off';
+  $('#offer-table-head').innerHTML = '<tr><th>Pagina</th><th>URL</th><th>Uso</th></tr>';
+  const rows = [
+    ['Home', pages.home || '-', 'entrada/pageview'],
+    ['Checkout', pages.checkout || '-', 'checkout e AddPaymentInfo'],
+    ['PIX', pages.pix || '-', 'polling e InitiateCheckout'],
+    ['Sucesso', pages.success || '-', 'pos-pagamento']
+  ];
+  $('#offer-table-body').innerHTML = rows.map((row) => `
+    <tr><td><strong>${escapeHtml(row[0])}</strong></td><td>${escapeHtml(row[1])}</td><td>${escapeHtml(row[2])}</td></tr>
+  `).join('');
+}
+
+function renderAudiencePanel(offer) {
+  const insights = offer.insights || {};
+  const sources = objEntries(insights.sourceStats || {}).slice(0, 8);
+  $('#offer-table-title').textContent = 'Publico e trafego';
+  $('#offer-table-count').textContent = `${insights.paidLeads || 0} pagos`;
+  $('#offer-table-head').innerHTML = '<tr><th>Origem</th><th>Leads</th><th>Leitura</th></tr>';
+  $('#offer-table-body').innerHTML = sources.map(([source, count]) => `
+    <tr><td><strong>${escapeHtml(source)}</strong></td><td>${count}</td><td>${count > 0 ? 'fonte com volume para avaliar criativo/campanha' : '-'}</td></tr>
+  `).join('') || '<tr><td colspan="3">Sem dados suficientes ainda.</td></tr>';
+}
+
+function renderBackredirectPanel(offer) {
+  const cfg = offer.settings?.backredirects || {};
+  const urls = Array.isArray(cfg.urls) ? cfg.urls : [];
+  $('#offer-table-title').textContent = 'Backredirects';
+  $('#offer-table-count').textContent = urls.length;
+  $('#offer-table-head').innerHTML = '<tr><th>Status</th><th>URL</th><th>Observacao</th></tr>';
+  $('#offer-table-body').innerHTML = (urls.length ? urls : ['']).map((url) => `
+    <tr><td>${cfg.enabled ? 'Ativo' : 'Desativado'}</td><td>${escapeHtml(url || '-')}</td><td>configuracao por oferta</td></tr>
+  `).join('');
+}
+
 function renderDispatchesTable(rows) {
   $('#offer-table-head').innerHTML = '<tr><th>Canal</th><th>Evento</th><th>Status</th><th>Processado</th></tr>';
   $('#offer-table-body').innerHTML = rows.map((job) => `
@@ -277,6 +442,18 @@ function renderDispatchesTable(rows) {
       <td>${dateText(job.processedAt || job.updatedAt)}</td>
     </tr>
   `).join('') || '<tr><td colspan="4">Sem fila ainda.</td></tr>';
+}
+
+function renderWebhooksTable(rows) {
+  $('#offer-table-head').innerHTML = '<tr><th>Gateway</th><th>TXID</th><th>Status</th><th>Recebido</th></tr>';
+  $('#offer-table-body').innerHTML = rows.map((wh) => `
+    <tr>
+      <td><strong>${escapeHtml(wh.gateway || '-')}</strong></td>
+      <td>${escapeHtml(wh.txid || '-')}</td>
+      <td>${escapeHtml(wh.status || '-')}<br><span class="muted">${escapeHtml(wh.statusRaw || '-')}</span></td>
+      <td>${dateText(wh.createdAt)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4">Nenhum webhook recebido.</td></tr>';
 }
 
 const gatewayNames = {
@@ -300,10 +477,23 @@ function renderSettingsForm() {
   setField(form, 'pushcut.enabled', Boolean(settings.pushcut?.enabled));
   setField(form, 'pushcut.pixCreatedUrl', settings.pushcut?.pixCreatedUrl || '');
   setField(form, 'pushcut.pixConfirmedUrl', settings.pushcut?.pixConfirmedUrl || '');
+  setField(form, 'pushcut.apiKey', settings.pushcut?.apiKey || '');
+  setField(form, 'pushcut.pixCreatedNotification', settings.pushcut?.pixCreatedNotification || '');
+  setField(form, 'pushcut.pixConfirmedNotification', settings.pushcut?.pixConfirmedNotification || '');
   setField(form, 'meta.enabled', Boolean(settings.meta?.enabled));
   setField(form, 'meta.pixelId', settings.meta?.pixelId || '');
   setField(form, 'meta.accessToken', settings.meta?.accessToken || '');
   setField(form, 'meta.testEventCode', settings.meta?.testEventCode || '');
+  setField(form, 'meta.backupPixelId', settings.meta?.backupPixelId || '');
+  setField(form, 'meta.backupAccessToken', settings.meta?.backupAccessToken || '');
+  setField(form, 'tiktok.enabled', Boolean(settings.tiktok?.enabled));
+  setField(form, 'tiktok.pixelId', settings.tiktok?.pixelId || '');
+  setField(form, 'pages.home', settings.pages?.home || '');
+  setField(form, 'pages.checkout', settings.pages?.checkout || '');
+  setField(form, 'pages.pix', settings.pages?.pix || '');
+  setField(form, 'pages.success', settings.pages?.success || '');
+  setField(form, 'backredirects.enabled', Boolean(settings.backredirects?.enabled));
+  setField(form, 'backredirects.urlsText', (settings.backredirects?.urls || []).join('\n'));
 
   $('#gateway-configs').innerHTML = ['atomopay', 'paradise', 'sunize', 'ghostspay'].map((gateway) => {
     const cfg = settings.payments?.gateways?.[gateway] || {};
@@ -359,6 +549,22 @@ function renderSettingsForm() {
             Product Hash
             <input name="gateways.${gateway}.productHash" value="${escapeHtml(cfg.productHash || '')}">
           </label>
+          <label>
+            Webhook Token
+            <input name="gateways.${gateway}.webhookToken" value="${escapeHtml(cfg.webhookToken || '')}" type="password">
+          </label>
+          <label>
+            Orderbump Hash
+            <input name="gateways.${gateway}.orderbumpHash" value="${escapeHtml(cfg.orderbumpHash || '')}">
+          </label>
+          <label>
+            Source
+            <input name="gateways.${gateway}.source" value="${escapeHtml(cfg.source || '')}">
+          </label>
+          <label>
+            Descricao
+            <input name="gateways.${gateway}.description" value="${escapeHtml(cfg.description || '')}">
+          </label>
         </div>
       </article>
     `;
@@ -403,7 +609,11 @@ function settingsFromForm() {
       companyId: getField(form, `gateways.${gateway}.companyId`),
       basicAuthBase64: getField(form, `gateways.${gateway}.basicAuthBase64`),
       offerHash: getField(form, `gateways.${gateway}.offerHash`),
-      productHash: getField(form, `gateways.${gateway}.productHash`)
+      productHash: getField(form, `gateways.${gateway}.productHash`),
+      webhookToken: getField(form, `gateways.${gateway}.webhookToken`),
+      orderbumpHash: getField(form, `gateways.${gateway}.orderbumpHash`),
+      source: getField(form, `gateways.${gateway}.source`),
+      description: getField(form, `gateways.${gateway}.description`)
     };
   }
   current.utmify = {
@@ -417,14 +627,39 @@ function settingsFromForm() {
     ...(current.pushcut || {}),
     enabled: getField(form, 'pushcut.enabled'),
     pixCreatedUrl: getField(form, 'pushcut.pixCreatedUrl'),
-    pixConfirmedUrl: getField(form, 'pushcut.pixConfirmedUrl')
+    pixConfirmedUrl: getField(form, 'pushcut.pixConfirmedUrl'),
+    apiKey: getField(form, 'pushcut.apiKey'),
+    pixCreatedNotification: getField(form, 'pushcut.pixCreatedNotification'),
+    pixConfirmedNotification: getField(form, 'pushcut.pixConfirmedNotification')
   };
   current.meta = {
     ...(current.meta || {}),
     enabled: getField(form, 'meta.enabled'),
     pixelId: getField(form, 'meta.pixelId'),
     accessToken: getField(form, 'meta.accessToken'),
-    testEventCode: getField(form, 'meta.testEventCode')
+    testEventCode: getField(form, 'meta.testEventCode'),
+    backupPixelId: getField(form, 'meta.backupPixelId'),
+    backupAccessToken: getField(form, 'meta.backupAccessToken')
+  };
+  current.tiktok = {
+    ...(current.tiktok || {}),
+    enabled: getField(form, 'tiktok.enabled'),
+    pixelId: getField(form, 'tiktok.pixelId')
+  };
+  current.pages = {
+    ...(current.pages || {}),
+    home: getField(form, 'pages.home'),
+    checkout: getField(form, 'pages.checkout'),
+    pix: getField(form, 'pages.pix'),
+    success: getField(form, 'pages.success')
+  };
+  current.backredirects = {
+    ...(current.backredirects || {}),
+    enabled: getField(form, 'backredirects.enabled'),
+    urls: String(getField(form, 'backredirects.urlsText') || '')
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
   };
   return current;
 }

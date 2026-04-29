@@ -251,10 +251,19 @@
           </section>
 
           <div class="tabs">
-            <button class="tab is-active" data-offer-tab="leads" type="button">Leads</button>
+            <button class="tab is-active" data-offer-tab="overview" type="button">Resumo</button>
+            <button class="tab" data-offer-tab="leads" type="button">Leads</button>
+            <button class="tab" data-offer-tab="sales" type="button">Vendas</button>
             <button class="tab" data-offer-tab="events" type="button">Eventos</button>
             <button class="tab" data-offer-tab="transactions" type="button">PIX</button>
+            <button class="tab" data-offer-tab="gateways" type="button">Gateways</button>
+            <button class="tab" data-offer-tab="tracking" type="button">Tracking</button>
+            <button class="tab" data-offer-tab="utmify" type="button">UTMify</button>
+            <button class="tab" data-offer-tab="pages" type="button">Paginas</button>
+            <button class="tab" data-offer-tab="audience" type="button">Publico</button>
+            <button class="tab" data-offer-tab="backredirects" type="button">Backredirect</button>
             <button class="tab" data-offer-tab="dispatches" type="button">Fila</button>
+            <button class="tab" data-offer-tab="webhooks" type="button">Webhooks</button>
           </div>
 
           <section class="panel">
@@ -325,11 +334,23 @@
                   </label>
                   <label>
                     Pushcut PIX gerado
-                    <input name="pushcut.pixCreatedUrl">
+                    <input name="pushcut.pixCreatedUrl" placeholder="Webhook URL opcional">
                   </label>
                   <label>
                     Pushcut PIX pago
-                    <input name="pushcut.pixConfirmedUrl">
+                    <input name="pushcut.pixConfirmedUrl" placeholder="Webhook URL opcional">
+                  </label>
+                  <label>
+                    Pushcut API Key
+                    <input name="pushcut.apiKey" type="password" placeholder="API-Key da Pushcut">
+                  </label>
+                  <label>
+                    Notification PIX gerado
+                    <input name="pushcut.pixCreatedNotification" placeholder="Nome da notification">
+                  </label>
+                  <label>
+                    Notification PIX pago
+                    <input name="pushcut.pixConfirmedNotification" placeholder="Nome da notification">
                   </label>
                   <label class="toggle">
                     <input name="meta.enabled" type="checkbox">
@@ -346,6 +367,46 @@
                   <label>
                     Test Event Code
                     <input name="meta.testEventCode">
+                  </label>
+                  <label>
+                    Pixel backup
+                    <input name="meta.backupPixelId">
+                  </label>
+                  <label>
+                    Token backup
+                    <input name="meta.backupAccessToken" type="password">
+                  </label>
+                  <label class="toggle">
+                    <input name="tiktok.enabled" type="checkbox">
+                    <span>TikTok Pixel ativo</span>
+                  </label>
+                  <label>
+                    TikTok Pixel ID
+                    <input name="tiktok.pixelId">
+                  </label>
+                  <label>
+                    Home da oferta
+                    <input name="pages.home" placeholder="https://...">
+                  </label>
+                  <label>
+                    Checkout
+                    <input name="pages.checkout" placeholder="https://...">
+                  </label>
+                  <label>
+                    Pagina PIX
+                    <input name="pages.pix" placeholder="https://...">
+                  </label>
+                  <label>
+                    Sucesso
+                    <input name="pages.success" placeholder="https://...">
+                  </label>
+                  <label class="toggle">
+                    <input name="backredirects.enabled" type="checkbox">
+                    <span>Backredirect ativo</span>
+                  </label>
+                  <label class="wide">
+                    URLs de backredirect
+                    <textarea name="backredirects.urlsText" rows="3" placeholder="Uma URL por linha"></textarea>
                   </label>
                 </div>
               </section>
