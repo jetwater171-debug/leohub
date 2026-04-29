@@ -534,8 +534,8 @@ tr:last-child td {
 }
 
 .tabs {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(9, minmax(120px, 1fr));
   gap: 8px;
   margin: 18px 0 12px;
   overflow: auto;
@@ -552,9 +552,142 @@ tr:last-child td {
 }
 
 .tab.is-active {
-  background: linear-gradient(135deg, var(--blue), var(--blue-2));
+  background: linear-gradient(135deg, #0b78ff, #00c2ff);
   color: #02101f;
   border-color: transparent;
+}
+
+.module-grid,
+.gateway-sales-mini {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.module-card,
+.control-card,
+.gateway-control-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(13, 30, 56, .92), rgba(4, 10, 22, .94));
+}
+
+.module-card {
+  padding: 16px;
+}
+
+.module-card.accent {
+  border-color: var(--line-strong);
+  box-shadow: 0 18px 55px rgba(47, 140, 255, .14);
+}
+
+.module-card span,
+.module-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.module-card strong {
+  display: block;
+  margin: 8px 0;
+  font-size: 28px;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.control-card {
+  padding: 16px;
+}
+
+.control-card h3,
+.gateway-control-card strong {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.status-list,
+.rank-list {
+  display: grid;
+  gap: 8px;
+}
+
+.status-list span,
+.rank-list span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .03);
+  color: #cfe5ff;
+}
+
+.status-list b,
+.rank-list b {
+  color: var(--muted);
+}
+
+.rank-list em {
+  color: var(--blue-2);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.module-form {
+  display: grid;
+  gap: 14px;
+}
+
+.gateway-control-list {
+  display: grid;
+  gap: 12px;
+}
+
+.gateway-control-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.gateway-control-head {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.gateway-control-head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.form-grid.dense {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mini-json {
+  max-width: 520px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #020814;
+  color: #d9f3ff;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .toggle {
@@ -636,13 +769,20 @@ tr:last-child td {
   }
 
   .metric-grid,
-  .offer-admin-grid {
+  .offer-admin-grid,
+  .module-grid,
+  .gateway-sales-mini {
     grid-template-columns: repeat(3, 1fr);
   }
 
   .split,
+  .control-grid,
   .login-layout {
     grid-template-columns: 1fr;
+  }
+
+  .tabs {
+    grid-template-columns: repeat(3, minmax(130px, 1fr));
   }
 }
 
@@ -679,9 +819,18 @@ tr:last-child td {
 
   .metric-grid,
   .offer-admin-grid,
+  .module-grid,
+  .gateway-sales-mini,
+  .control-grid,
   .form-grid,
   .key-grid,
-  .gateway-card .form-grid {
+  .gateway-card .form-grid,
+  .form-grid.dense,
+  .gateway-control-head {
+    grid-template-columns: 1fr;
+  }
+
+  .tabs {
     grid-template-columns: 1fr;
   }
 

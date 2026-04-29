@@ -16,6 +16,18 @@ const money = (value) => Number(value || 0).toLocaleString('pt-BR', {
   currency: 'BRL'
 });
 
+const offerModules = [
+  ['overview', 'Visao geral'],
+  ['tracking', 'Tracking'],
+  ['utmify', 'UTMfy'],
+  ['gateways', 'Gateways'],
+  ['pages', 'Paginas'],
+  ['audience', 'Publico'],
+  ['sales', 'Vendas'],
+  ['backredirects', 'Backredirects'],
+  ['leads', 'Leads']
+];
+
 const dateText = (value) => {
   if (!value) return '-';
   const date = new Date(value);
@@ -29,6 +41,37 @@ function escapeHtml(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function boolAttr(value) {
+  return value ? 'checked' : '';
+}
+
+function prettyJson(value) {
+  try {
+    return JSON.stringify(value || {}, null, 2);
+  } catch (_error) {
+    return '{}';
+  }
+}
+
+function ensureOfferTable() {
+  const content = $('#offer-module-content');
+  if (!content) return;
+  content.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead id="offer-table-head"></thead>
+        <tbody id="offer-table-body"></tbody>
+      </table>
+    </div>
+  `;
+}
+
+function setOfferModuleHtml(title, count, html) {
+  $('#offer-table-title').textContent = title;
+  $('#offer-table-count').textContent = count;
+  $('#offer-module-content').innerHTML = html;
 }
 
 async function api(path, options = {}) {
@@ -202,6 +245,12 @@ async function renderOfferPanel() {
   $('#offer-public-key').value = offer.publicKey || '';
   $('#offer-id').value = offer.id || '';
   $('#offer-slug').value = offer.slug || '';
+  const tabs = document.querySelector('.tabs');
+  if (tabs) {
+    tabs.innerHTML = offerModules.map(([key, label]) => (
+      `<button class="tab${state.activeOfferTab === key ? ' is-active' : ''}" data-offer-tab="${key}" type="button">${label}</button>`
+    )).join('');
+  }
   await renderOfferCollection(state.activeOfferTab);
 }
 
@@ -213,12 +262,12 @@ async function renderOfferCollection(collection) {
   const virtualRenderers = {
     overview: renderOfferOverviewTable,
     sales: renderSalesTable,
-    gateways: renderGatewayPanel,
-    tracking: renderTrackingPanel,
-    utmify: renderUtmifyPanel,
-    pages: renderPagesPanel,
+    gateways: renderGatewaysControl,
+    tracking: renderTrackingControl,
+    utmify: renderUtmifyControl,
+    pages: renderPagesControl,
     audience: renderAudiencePanel,
-    backredirects: renderBackredirectPanel
+    backredirects: renderBackredirectControl
   };
   if (virtualRenderers[collection]) {
     await virtualRenderers[collection](offer);
@@ -235,6 +284,7 @@ async function renderOfferCollection(collection) {
   const data = await api(`/api/admin/offers/${encodeURIComponent(offer.id)}/${collection}`);
   const rows = data.data || [];
   $('#offer-table-count').textContent = rows.length;
+  ensureOfferTable();
   const renderers = {
     leads: renderLeadsTable,
     events: renderEventsTable,
@@ -716,7 +766,402 @@ async function copyText(text) {
   await navigator.clipboard.writeText(text);
 }
 
+async function saveActiveOfferSettings(settingsPatch) {
+  const offer = activeOffer();
+  if (!offer) return;
+  await api(`/api/admin/offers/${encodeURIComponent(offer.id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ settings: settingsPatch })
+  });
+  await bootstrap();
+  setView('offer');
+}
+
+function renderOfferOverviewTable(offer) {
+  const insights = offer.insights || {};
+  const gateway = objEntries(insights.gatewayStats || {})[0];
+  const source = objEntries(insights.sourceStats || {})[0];
+  const stage = objEntries(insights.stageStats || {})[0];
+  const page = objEntries(insights.pageStats || {})[0];
+  const st = offer.stats || {};
+  setOfferModuleHtml('Visao geral da oferta', 'ao vivo', `
+    <div class="module-grid">
+      <article class="module-card accent"><span>Receita</span><strong>${money(st.revenue || 0)}</strong><small>${st.paid || 0} vendas pagas</small></article>
+      <article class="module-card"><span>PIX</span><strong>${st.transactions || 0}</strong><small>${st.conversion || 0}% conversao pagamento</small></article>
+      <article class="module-card"><span>Leads</span><strong>${st.leads || 0}</strong><small>${st.events || 0} eventos trackeados</small></article>
+      <article class="module-card"><span>Gateway atual</span><strong>${escapeHtml(offer.settings?.payments?.activeGateway || '-')}</strong><small>${gateway ? `${gateway[1].paid || 0}/${gateway[1].generated || 0} pagos no top gateway` : 'sem dados'}</small></article>
+    </div>
+    <div class="control-grid">
+      <section class="control-card">
+        <h3>Operacao</h3>
+        <div class="status-list">
+          <span><b>Top origem</b>${escapeHtml(source ? `${source[0]} (${source[1]} leads)` : '-')}</span>
+          <span><b>Top etapa</b>${escapeHtml(stage ? `${stage[0]} (${stage[1]})` : '-')}</span>
+          <span><b>Top pagina/evento</b>${escapeHtml(page ? `${page[0]} (${page[1]})` : '-')}</span>
+        </div>
+      </section>
+      <section class="control-card">
+        <h3>Integracoes da oferta</h3>
+        <div class="status-list">
+          <span><b>UTMfy</b>${offer.settings?.utmify?.enabled ? 'Ativo' : 'Desativado'}</span>
+          <span><b>Pushcut</b>${offer.settings?.pushcut?.enabled ? 'Ativo' : 'Desativado'}</span>
+          <span><b>Meta Pixel/CAPI</b>${offer.settings?.meta?.enabled ? 'Ativo' : 'Desativado'}</span>
+          <span><b>TikTok Pixel</b>${offer.settings?.tiktok?.enabled ? 'Ativo' : 'Desativado'}</span>
+        </div>
+      </section>
+    </div>
+  `);
+}
+
+function renderLeadsTable(rows) {
+  $('#offer-table-head').innerHTML = '<tr><th>Lead</th><th>Contato / docs</th><th>Endereco / IP</th><th>PIX / gateway</th><th>Tracking</th><th>Payload</th></tr>';
+  $('#offer-table-body').innerHTML = rows.map((lead) => `
+    <tr>
+      <td><strong>${escapeHtml(lead.name || 'Lead sem nome')}</strong><br><span class="muted">${escapeHtml(lead.sessionId || '-')}</span><br><span class="pill">${escapeHtml(lead.lastEvent || '-')}</span></td>
+      <td>${escapeHtml(lead.email || '-')}<br><span class="muted">${escapeHtml(lead.phone || '-')} | ${escapeHtml(lead.document || '-')}</span></td>
+      <td>${escapeHtml(lead.address?.city || '-')} ${escapeHtml(lead.address?.state || '')}<br><span class="muted">${escapeHtml(lead.address?.cep || '')} | ${escapeHtml(lead.clientIp || '-')}</span></td>
+      <td>${escapeHtml(lead.pixTxid || '-')}<br><span class="muted">${lead.pixAmount ? money(lead.pixAmount) : '-'} | ${escapeHtml(lead.pix?.gateway || lead.payload?.gateway || '-')}</span></td>
+      <td>${escapeHtml(lead.utm?.utm_source || lead.utm?.src || '-')}<br><span class="muted">${escapeHtml(lead.utm?.utm_campaign || '-')}</span><br><span class="muted">${dateText(lead.updatedAt)}</span></td>
+      <td><details><summary>ver dados</summary><pre class="mini-json">${escapeHtml(prettyJson(lead.payload))}</pre></details></td>
+    </tr>
+  `).join('') || '<tr><td colspan="6">Sem leads ainda.</td></tr>';
+}
+
+function renderGatewaysControl(offer) {
+  const settings = offer.settings || {};
+  const payments = settings.payments || {};
+  const gateways = payments.gateways || {};
+  const insights = offer.insights?.gatewayStats || {};
+  setOfferModuleHtml('Gateways da oferta', `${Object.keys(gatewayNames).length} gateways`, `
+    <form class="module-form" data-offer-module-form="gateways">
+      <div class="control-card">
+        <div class="form-grid">
+          <label>Gateway ativo
+            <select name="payments.activeGateway">
+              ${Object.keys(gatewayNames).map((gateway) => `<option value="${gateway}" ${payments.activeGateway === gateway ? 'selected' : ''}>${gatewayNames[gateway]}</option>`).join('')}
+            </select>
+          </label>
+          <label>Ordem de fallback
+            <input name="payments.gatewayOrderText" value="${escapeHtml((payments.gatewayOrder || []).join(','))}">
+          </label>
+        </div>
+      </div>
+      <div class="gateway-control-list">
+        ${Object.keys(gatewayNames).map((gateway) => {
+          const cfg = gateways[gateway] || {};
+          const stats = insights[gateway] || {};
+          return `
+            <article class="gateway-control-card">
+              <div class="gateway-control-head">
+                <div><strong>${gatewayNames[gateway]}</strong><span>${stats.paid || 0} pagos / ${stats.generated || 0} gerados | ${money(stats.revenue || 0)}</span></div>
+                <label class="toggle"><input name="gateways.${gateway}.enabled" type="checkbox" ${boolAttr(cfg.enabled)}><span>Ativo</span></label>
+                <label class="toggle"><input name="gateways.${gateway}.mockMode" type="checkbox" ${boolAttr(cfg.mockMode)}><span>Mock</span></label>
+              </div>
+              <div class="form-grid dense">
+                <label>Base URL<input name="gateways.${gateway}.baseUrl" value="${escapeHtml(cfg.baseUrl || '')}"></label>
+                <label>Timeout<input name="gateways.${gateway}.timeoutMs" value="${escapeHtml(cfg.timeoutMs || 12000)}"></label>
+                <label>Webhook Token<input name="gateways.${gateway}.webhookToken" type="password" value="${escapeHtml(cfg.webhookToken || '')}"></label>
+                <label>API Key<input name="gateways.${gateway}.apiKey" type="password" value="${escapeHtml(cfg.apiKey || '')}"></label>
+                <label>API Secret<input name="gateways.${gateway}.apiSecret" type="password" value="${escapeHtml(cfg.apiSecret || '')}"></label>
+                <label>API Token<input name="gateways.${gateway}.apiToken" type="password" value="${escapeHtml(cfg.apiToken || '')}"></label>
+                <label>Secret Key<input name="gateways.${gateway}.secretKey" type="password" value="${escapeHtml(cfg.secretKey || '')}"></label>
+                <label>Company ID<input name="gateways.${gateway}.companyId" value="${escapeHtml(cfg.companyId || '')}"></label>
+                <label>Basic Auth Base64<input name="gateways.${gateway}.basicAuthBase64" type="password" value="${escapeHtml(cfg.basicAuthBase64 || '')}"></label>
+                <label>Offer Hash<input name="gateways.${gateway}.offerHash" value="${escapeHtml(cfg.offerHash || '')}"></label>
+                <label>Product Hash<input name="gateways.${gateway}.productHash" value="${escapeHtml(cfg.productHash || '')}"></label>
+                <label>Orderbump Hash<input name="gateways.${gateway}.orderbumpHash" value="${escapeHtml(cfg.orderbumpHash || '')}"></label>
+                <label>Source<input name="gateways.${gateway}.source" value="${escapeHtml(cfg.source || '')}"></label>
+                <label>Descricao<input name="gateways.${gateway}.description" value="${escapeHtml(cfg.description || '')}"></label>
+              </div>
+              <code>${escapeHtml(`${state.baseUrl}/api/v1/webhooks/${gateway}?offer_id=${offer.id}&token=${cfg.webhookToken || 'TOKEN'}`)}</code>
+            </article>
+          `;
+        }).join('')}
+      </div>
+      <button class="primary" type="submit">Salvar gateways desta oferta</button>
+      <span class="module-form-status muted"></span>
+    </form>
+  `);
+}
+
+function renderTrackingControl(offer) {
+  const meta = offer.settings?.meta || {};
+  const tiktok = offer.settings?.tiktok || {};
+  const tracking = offer.settings?.tracking || {};
+  setOfferModuleHtml('Tracking da oferta', meta.enabled || tiktok.enabled ? 'ativo' : 'off', `
+    <form class="module-form" data-offer-module-form="tracking">
+      <div class="control-grid">
+        <section class="control-card">
+          <h3>Meta Pixel + CAPI</h3>
+          <div class="form-grid">
+            <label class="toggle"><input name="meta.enabled" type="checkbox" ${boolAttr(meta.enabled)}><span>Meta ativo</span></label>
+            <label>Pixel ID<input name="meta.pixelId" value="${escapeHtml(meta.pixelId || '')}"></label>
+            <label>Access Token<input name="meta.accessToken" type="password" value="${escapeHtml(meta.accessToken || '')}"></label>
+            <label>Test Event Code<input name="meta.testEventCode" value="${escapeHtml(meta.testEventCode || '')}"></label>
+            <label>Pixel backup<input name="meta.backupPixelId" value="${escapeHtml(meta.backupPixelId || '')}"></label>
+            <label>Token backup<input name="meta.backupAccessToken" type="password" value="${escapeHtml(meta.backupAccessToken || '')}"></label>
+          </div>
+        </section>
+        <section class="control-card">
+          <h3>TikTok e captura</h3>
+          <div class="form-grid">
+            <label class="toggle"><input name="tiktok.enabled" type="checkbox" ${boolAttr(tiktok.enabled)}><span>TikTok ativo</span></label>
+            <label>TikTok Pixel ID<input name="tiktok.pixelId" value="${escapeHtml(tiktok.pixelId || '')}"></label>
+            <label class="toggle"><input name="tracking.firstTouch" type="checkbox" ${boolAttr(tracking.firstTouch)}><span>First-touch</span></label>
+            <label class="toggle"><input name="tracking.sourceBasedRouting" type="checkbox" ${boolAttr(tracking.sourceBasedRouting)}><span>Enviar por origem</span></label>
+            <label class="toggle"><input name="tracking.captureFbclid" type="checkbox" ${boolAttr(tracking.captureFbclid !== false)}><span>fbclid</span></label>
+            <label class="toggle"><input name="tracking.captureTtclid" type="checkbox" ${boolAttr(tracking.captureTtclid !== false)}><span>ttclid</span></label>
+            <label class="toggle"><input name="tracking.captureGclid" type="checkbox" ${boolAttr(tracking.captureGclid !== false)}><span>gclid</span></label>
+          </div>
+        </section>
+      </div>
+      <button class="primary" type="submit">Salvar tracking desta oferta</button>
+      <span class="module-form-status muted"></span>
+    </form>
+  `);
+}
+
+function renderUtmifyControl(offer) {
+  const utmify = offer.settings?.utmify || {};
+  const pushcut = offer.settings?.pushcut || {};
+  setOfferModuleHtml('UTMfy e Pushcut da oferta', [utmify.enabled && 'UTMfy', pushcut.enabled && 'Pushcut'].filter(Boolean).join(' + ') || 'off', `
+    <form class="module-form" data-offer-module-form="utmify">
+      <div class="control-grid">
+        <section class="control-card">
+          <h3>UTMfy</h3>
+          <div class="form-grid">
+            <label class="toggle"><input name="utmify.enabled" type="checkbox" ${boolAttr(utmify.enabled)}><span>Ativo</span></label>
+            <label>Endpoint<input name="utmify.endpoint" value="${escapeHtml(utmify.endpoint || '')}"></label>
+            <label>API Key<input name="utmify.apiKey" type="password" value="${escapeHtml(utmify.apiKey || '')}"></label>
+            <label>Plataforma<input name="utmify.platform" value="${escapeHtml(utmify.platform || 'LEOHUB')}"></label>
+            <label class="toggle"><input name="utmify.sendPixCreated" type="checkbox" ${boolAttr(utmify.sendPixCreated !== false)}><span>Enviar PIX gerado</span></label>
+            <label class="toggle"><input name="utmify.sendPixConfirmed" type="checkbox" ${boolAttr(utmify.sendPixConfirmed !== false)}><span>Enviar PIX pago</span></label>
+            <label class="toggle"><input name="utmify.sendRefunds" type="checkbox" ${boolAttr(utmify.sendRefunds !== false)}><span>Enviar recusas/reembolso</span></label>
+          </div>
+        </section>
+        <section class="control-card">
+          <h3>Pushcut</h3>
+          <div class="form-grid">
+            <label class="toggle"><input name="pushcut.enabled" type="checkbox" ${boolAttr(pushcut.enabled)}><span>Ativo</span></label>
+            <label>API Key<input name="pushcut.apiKey" type="password" value="${escapeHtml(pushcut.apiKey || '')}"></label>
+            <label>Notification PIX gerado<input name="pushcut.pixCreatedNotification" value="${escapeHtml(pushcut.pixCreatedNotification || '')}"></label>
+            <label>Notification PIX pago<input name="pushcut.pixConfirmedNotification" value="${escapeHtml(pushcut.pixConfirmedNotification || '')}"></label>
+            <label>Webhook PIX gerado<input name="pushcut.pixCreatedUrl" value="${escapeHtml(pushcut.pixCreatedUrl || '')}"></label>
+            <label>Webhook PIX pago<input name="pushcut.pixConfirmedUrl" value="${escapeHtml(pushcut.pixConfirmedUrl || '')}"></label>
+          </div>
+        </section>
+      </div>
+      <button class="primary" type="submit">Salvar UTMfy/Pushcut desta oferta</button>
+      <span class="module-form-status muted"></span>
+    </form>
+  `);
+}
+
+function renderPagesControl(offer) {
+  const pages = offer.settings?.pages || {};
+  setOfferModuleHtml('Paginas da oferta', pages.enabled ? 'ativo' : 'off', `
+    <form class="module-form" data-offer-module-form="pages">
+      <div class="control-card">
+        <div class="form-grid">
+          <label class="toggle"><input name="pages.enabled" type="checkbox" ${boolAttr(pages.enabled !== false)}><span>Paginas ativas</span></label>
+          <label>Home<input name="pages.home" value="${escapeHtml(pages.home || '')}" placeholder="https://..."></label>
+          <label>Checkout<input name="pages.checkout" value="${escapeHtml(pages.checkout || '')}" placeholder="https://..."></label>
+          <label>PIX<input name="pages.pix" value="${escapeHtml(pages.pix || '')}" placeholder="https://..."></label>
+          <label>Sucesso<input name="pages.success" value="${escapeHtml(pages.success || '')}" placeholder="https://..."></label>
+        </div>
+      </div>
+      <button class="primary" type="submit">Salvar paginas desta oferta</button>
+      <span class="module-form-status muted"></span>
+    </form>
+  `);
+}
+
+function renderBackredirectControl(offer) {
+  const cfg = offer.settings?.backredirects || {};
+  setOfferModuleHtml('Backredirects da oferta', Array.isArray(cfg.urls) ? cfg.urls.length : 0, `
+    <form class="module-form" data-offer-module-form="backredirects">
+      <div class="control-card">
+        <div class="form-grid">
+          <label class="toggle"><input name="backredirects.enabled" type="checkbox" ${boolAttr(cfg.enabled)}><span>Backredirect ativo</span></label>
+          <label class="wide">URLs, uma por linha<textarea name="backredirects.urlsText" rows="6">${escapeHtml((cfg.urls || []).join('\n'))}</textarea></label>
+        </div>
+      </div>
+      <button class="primary" type="submit">Salvar backredirect desta oferta</button>
+      <span class="module-form-status muted"></span>
+    </form>
+  `);
+}
+
+async function renderSalesTable(offer) {
+  const data = await api(`/api/admin/offers/${encodeURIComponent(offer.id)}/transactions`);
+  const rows = (data.data || []).filter((tx) => tx.status === 'paid');
+  const byGateway = offer.insights?.gatewayStats || {};
+  setOfferModuleHtml('Vendas da oferta', rows.length, `
+    <div class="gateway-sales-mini">
+      ${Object.entries(byGateway).map(([gateway, stats]) => `
+        <article class="module-card">
+          <span>${escapeHtml(gatewayNames[gateway] || gateway)}</span>
+          <strong>${money(stats.revenue || 0)}</strong>
+          <small>${stats.paid || 0} pagos / ${stats.generated || 0} PIX</small>
+        </article>
+      `).join('') || '<p class="muted">Sem vendas por gateway ainda.</p>'}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Venda</th><th>Lead</th><th>Valor</th><th>Gateway</th><th>Pago em</th><th>Payload</th></tr></thead>
+        <tbody>
+          ${rows.map((tx) => `
+            <tr>
+              <td><strong>${escapeHtml(tx.txid || '-')}</strong><br><span class="muted">${escapeHtml(tx.statusRaw || '-')}</span></td>
+              <td>${escapeHtml(tx.sessionId || tx.leadId || '-')}</td>
+              <td>${money(tx.amount || 0)}</td>
+              <td>${escapeHtml(tx.gateway || '-')}</td>
+              <td>${dateText(tx.updatedAt || tx.createdAt)}</td>
+              <td><details><summary>ver</summary><pre class="mini-json">${escapeHtml(prettyJson(tx.gatewayPayload || tx.webhookPayload || tx))}</pre></details></td>
+            </tr>
+          `).join('') || '<tr><td colspan="6">Nenhuma venda paga ainda.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `);
+}
+
+function renderAudiencePanel(offer) {
+  const insights = offer.insights || {};
+  const sources = objEntries(insights.sourceStats || {}).slice(0, 12);
+  const stages = objEntries(insights.stageStats || {}).slice(0, 12);
+  setOfferModuleHtml('Publico da oferta', `${insights.paidLeads || 0} pagos`, `
+    <div class="control-grid">
+      <section class="control-card">
+        <h3>Origens e campanhas</h3>
+        <div class="rank-list">
+          ${sources.map(([source, count]) => `<span><b>${escapeHtml(source)}</b><em>${count} leads</em></span>`).join('') || '<p class="muted">Sem origem ainda.</p>'}
+        </div>
+      </section>
+      <section class="control-card">
+        <h3>Etapas com volume</h3>
+        <div class="rank-list">
+          ${stages.map(([stage, count]) => `<span><b>${escapeHtml(stage)}</b><em>${count} leads</em></span>`).join('') || '<p class="muted">Sem etapas ainda.</p>'}
+        </div>
+      </section>
+    </div>
+  `);
+}
+
+function moduleSettingsFromForm(form, module) {
+  const get = (name) => getField(form, name);
+  if (module === 'gateways') {
+    const gateways = {};
+    for (const gateway of Object.keys(gatewayNames)) {
+      gateways[gateway] = {
+        enabled: get(`gateways.${gateway}.enabled`),
+        mockMode: get(`gateways.${gateway}.mockMode`),
+        timeoutMs: Number(get(`gateways.${gateway}.timeoutMs`) || 12000),
+        baseUrl: get(`gateways.${gateway}.baseUrl`),
+        webhookToken: get(`gateways.${gateway}.webhookToken`),
+        apiKey: get(`gateways.${gateway}.apiKey`),
+        apiSecret: get(`gateways.${gateway}.apiSecret`),
+        apiToken: get(`gateways.${gateway}.apiToken`),
+        secretKey: get(`gateways.${gateway}.secretKey`),
+        companyId: get(`gateways.${gateway}.companyId`),
+        basicAuthBase64: get(`gateways.${gateway}.basicAuthBase64`),
+        offerHash: get(`gateways.${gateway}.offerHash`),
+        productHash: get(`gateways.${gateway}.productHash`),
+        orderbumpHash: get(`gateways.${gateway}.orderbumpHash`),
+        source: get(`gateways.${gateway}.source`),
+        description: get(`gateways.${gateway}.description`)
+      };
+    }
+    return {
+      payments: {
+        activeGateway: get('payments.activeGateway'),
+        gatewayOrder: String(get('payments.gatewayOrderText') || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean),
+        gateways
+      }
+    };
+  }
+  if (module === 'tracking') {
+    return {
+      meta: {
+        enabled: get('meta.enabled'),
+        pixelId: get('meta.pixelId'),
+        accessToken: get('meta.accessToken'),
+        testEventCode: get('meta.testEventCode'),
+        backupPixelId: get('meta.backupPixelId'),
+        backupAccessToken: get('meta.backupAccessToken')
+      },
+      tiktok: {
+        enabled: get('tiktok.enabled'),
+        pixelId: get('tiktok.pixelId')
+      },
+      tracking: {
+        firstTouch: get('tracking.firstTouch'),
+        sourceBasedRouting: get('tracking.sourceBasedRouting'),
+        captureFbclid: get('tracking.captureFbclid'),
+        captureTtclid: get('tracking.captureTtclid'),
+        captureGclid: get('tracking.captureGclid')
+      }
+    };
+  }
+  if (module === 'utmify') {
+    return {
+      utmify: {
+        enabled: get('utmify.enabled'),
+        endpoint: get('utmify.endpoint'),
+        apiKey: get('utmify.apiKey'),
+        platform: get('utmify.platform'),
+        sendPixCreated: get('utmify.sendPixCreated'),
+        sendPixConfirmed: get('utmify.sendPixConfirmed'),
+        sendRefunds: get('utmify.sendRefunds')
+      },
+      pushcut: {
+        enabled: get('pushcut.enabled'),
+        apiKey: get('pushcut.apiKey'),
+        pixCreatedNotification: get('pushcut.pixCreatedNotification'),
+        pixConfirmedNotification: get('pushcut.pixConfirmedNotification'),
+        pixCreatedUrl: get('pushcut.pixCreatedUrl'),
+        pixConfirmedUrl: get('pushcut.pixConfirmedUrl')
+      }
+    };
+  }
+  if (module === 'pages') {
+    return {
+      pages: {
+        enabled: get('pages.enabled'),
+        home: get('pages.home'),
+        checkout: get('pages.checkout'),
+        pix: get('pages.pix'),
+        success: get('pages.success')
+      }
+    };
+  }
+  if (module === 'backredirects') {
+    return {
+      backredirects: {
+        enabled: get('backredirects.enabled'),
+        urls: String(get('backredirects.urlsText') || '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+      }
+    };
+  }
+  return {};
+}
+
 function bindEvents() {
+  document.addEventListener('submit', async (event) => {
+    const form = event.target.closest('[data-offer-module-form]');
+    if (!form) return;
+    event.preventDefault();
+    const status = form.querySelector('.module-form-status');
+    if (status) status.textContent = 'Salvando...';
+    try {
+      const module = form.getAttribute('data-offer-module-form');
+      await saveActiveOfferSettings(moduleSettingsFromForm(form, module));
+      if (status) status.textContent = 'Salvo';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Erro ao salvar';
+    }
+  });
+
   $('#login-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     $('#login-error').textContent = '';
@@ -735,6 +1180,11 @@ function bindEvents() {
 
   $$('.nav-item').forEach((item) => item.addEventListener('click', () => setView(item.dataset.view)));
   document.addEventListener('click', async (event) => {
+    const offerTab = event.target.closest('[data-offer-tab]');
+    if (offerTab) {
+      await renderOfferCollection(offerTab.dataset.offerTab);
+      return;
+    }
     const jump = event.target.closest('[data-view-jump]');
     if (jump) setView(jump.dataset.viewJump);
     const open = event.target.closest('[data-open-offer]');
@@ -788,8 +1238,6 @@ function bindEvents() {
     await bootstrap();
     setView('users');
   });
-
-  $$('.tab').forEach((tab) => tab.addEventListener('click', () => renderOfferCollection(tab.dataset.offerTab)));
 
   $('#copy-public-key').addEventListener('click', async () => {
     await copyText($('#offer-public-key').value);
