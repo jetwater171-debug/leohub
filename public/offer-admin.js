@@ -400,6 +400,11 @@ function renderUtmify() {
         ${input('pushcut.pixCreatedUrl', 'Webhook PIX gerado', push.templates?.pixCreatedUrl || push.pixCreatedUrl)}
         ${input('pushcut.pixConfirmedUrl', 'Webhook PIX pago', push.templates?.pixConfirmedUrl || push.pixConfirmedUrl)}
       </div>
+      <div class="admin-form-actions">
+        <button id="process-dispatches" class="btn-secondary" type="button">Processar fila agora</button>
+        <button id="send-test-dispatch" class="btn-secondary" type="button">Enviar teste de evento</button>
+        <span id="dispatch-action-status" class="admin-muted"></span>
+      </div>
     </section>
   `;
 }
@@ -482,6 +487,10 @@ function renderSales() {
         ${kpi('Receita total', money(rows.reduce((sum, tx) => sum + Number(tx.amount || 0), 0)), 'Pagamentos pagos', true)}
         ${kpi('PIX gerados', state.transactions.length, 'Todos os status')}
         ${gateways.map((gateway) => kpi(gatewayNames[gateway], money(byGateway[gateway]?.revenue || 0), `${byGateway[gateway]?.paid || 0} vendas`)).join('')}
+      </div>
+      <div class="admin-form-actions">
+        <button id="reconcile-pix" class="btn-secondary" type="button">Consultar transacoes pendentes</button>
+        <span id="reconcile-status" class="admin-muted"></span>
       </div>
     </section>
     ${transactionsTable(state.transactions)}
@@ -571,9 +580,7 @@ function collectSettings() {
       return;
     }
     if (path.endsWith('.timeoutMs')) value = Number(value || 12000);
-    if (path.includes('pushcut.pixCreatedUrl')) pathSetPushcut(next, 'pixCreatedUrl', value);
-    else if (path.includes('pushcut.pixConfirmedUrl')) pathSetPushcut(next, 'pixConfirmedUrl', value);
-    else setDeep(next, path, value);
+    setDeep(next, path, value);
   });
   if (state.activeTab === 'gateways') {
     const order = $$('#payments-gateway-order [data-gateway-order-item]').map((item) => item.dataset.gatewayOrderItem);
@@ -581,12 +588,6 @@ function collectSettings() {
     setDeep(next, 'payments.activeGateway', order[0] || 'atomopay');
   }
   return next;
-}
-
-function pathSetPushcut(next, key, value) {
-  next.pushcut = next.pushcut || {};
-  next.pushcut.templates = next.pushcut.templates || {};
-  next.pushcut.templates[key] = value;
 }
 
 function setDeep(target, path, value) {
@@ -618,25 +619,23 @@ async function testGatewayPix() {
   output.classList.add('hidden');
   const body = {
     amount: 1.99,
-    gateway: settings().payments?.activeGateway || 'atomopay',
-    sessionId: `admin_test_${Date.now()}`,
+    gateways,
     customer: { name: 'Teste LEOHUB', email: 'teste@leohub.local', document: '12345678909', phone: '11999999999' },
     utm: { utm_source: 'admin_test' }
   };
-  const response = await fetch('/api/v1/pix/create', {
+  const data = await api(`/api/admin/offers/${encodeURIComponent(state.offer.id)}/gateway-test-pix`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-leohub-offer-key': state.offer.publicKey },
     body: JSON.stringify(body)
   });
-  const data = await response.json().catch(() => ({}));
-  status.textContent = data.ok ? `PIX gerado em ${data.gateway}` : `Falha: ${data.error || response.status}`;
+  status.textContent = data.ok ? 'Teste executado' : 'Todos os gateways falharam';
   output.textContent = JSON.stringify(data, null, 2);
   output.classList.remove('hidden');
   await loadCollections();
 }
 
-function showLeadDetail(leadId) {
-  const lead = state.leads.find((item) => item.id === leadId);
+async function showLeadDetail(leadId) {
+  const detail = await api(`/api/admin/offers/${encodeURIComponent(state.offer.id)}/leads/${encodeURIComponent(leadId)}`).catch(() => ({}));
+  const lead = detail.lead || state.leads.find((item) => item.id === leadId);
   if (!lead) return;
   const payload = payloadOf(lead);
   const customer = payload.customer || payload.personal || {};
@@ -658,7 +657,12 @@ function showLeadDetail(leadId) {
     ['Gateway', pix.gateway || lead.gateway],
     ['Valor', money(lead.pixAmount || pix.amount || 0)]
   ]);
-  $('#lead-detail-payload').textContent = JSON.stringify(lead, null, 2);
+  $('#lead-detail-payload').textContent = JSON.stringify({
+    lead,
+    transactions: detail.transactions || [],
+    events: detail.events || [],
+    pageviews: detail.pageviews || []
+  }, null, 2);
   $('#lead-detail-modal').classList.remove('hidden');
 }
 
@@ -752,6 +756,30 @@ document.addEventListener('click', async (event) => {
     a.download = `leads-${state.offer.slug || state.offer.id}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+  if (event.target.id === 'reconcile-pix') {
+    const status = $('#reconcile-status');
+    status.textContent = 'Consultando gateways...';
+    const data = await api(`/api/admin/offers/${encodeURIComponent(state.offer.id)}/pix-reconcile`, {
+      method: 'POST',
+      body: JSON.stringify({ limit: 100 })
+    });
+    status.textContent = `Consultados ${data.checked || 0}, atualizados ${data.updated || 0}, pagos ${data.confirmed || 0}, pendentes ${data.pending || 0}.`;
+    await loadCollections();
+    renderSales();
+  }
+  if (event.target.id === 'process-dispatches' || event.target.id === 'send-test-dispatch') {
+    const status = $('#dispatch-action-status');
+    status.textContent = 'Processando...';
+    const body = event.target.id === 'send-test-dispatch'
+      ? { eventName: 'pix_confirmed', amount: 1.99, sessionId: `dispatch_test_${Date.now()}` }
+      : {};
+    const data = await api(`/api/admin/offers/${encodeURIComponent(state.offer.id)}/dispatch-process`, {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    status.textContent = `Fila processada. Pendentes: ${data.pending || 0}`;
+    await loadCollections();
   }
 });
 

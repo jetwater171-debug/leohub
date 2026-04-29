@@ -591,6 +591,14 @@ function requireOffer(req, res) {
   return null;
 }
 
+function findLeadForOffer(offerId, leadIdOrSession = '') {
+  const key = toText(leadIdOrSession, 300);
+  return STORE.leads.find((lead) =>
+    lead.offerId === offerId &&
+    (lead.id === key || lead.sessionId === key || lead.pixTxid === key || lead.payload?.pix?.idTransaction === key)
+  ) || null;
+}
+
 function sendJson(res, status, body, headers = {}) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -1416,6 +1424,39 @@ async function getPixStatus(offer, body = {}, req = null) {
   return { ok: true, transaction };
 }
 
+async function reconcileOfferPix(offer, limit = 100, req = null) {
+  const rows = STORE.transactions
+    .filter((tx) => tx.offerId === offer.id && !isTerminalPaymentStatus(tx.status))
+    .slice(-Math.max(1, Math.min(Number(limit) || 100, 300)))
+    .reverse();
+  const summary = { checked: 0, updated: 0, confirmed: 0, pending: 0, refunded: 0, refused: 0, failed: 0, results: [] };
+  for (const tx of rows) {
+    summary.checked += 1;
+    const previous = tx.status;
+    const result = await getPixStatus(offer, { idTransaction: tx.txid || tx.id }, req).catch((error) => ({
+      ok: false,
+      error: error?.message || 'status_error'
+    }));
+    const current = result.transaction || STORE.transactions.find((item) => item.id === tx.id) || tx;
+    if (!result.ok || result.remoteError) summary.failed += 1;
+    if (current.status !== previous) summary.updated += 1;
+    if (current.status === 'paid') summary.confirmed += 1;
+    else if (current.status === 'refunded') summary.refunded += 1;
+    else if (current.status === 'refused' || current.status === 'chargedback') summary.refused += 1;
+    else summary.pending += 1;
+    summary.results.push({
+      id: current.id,
+      txid: current.txid,
+      gateway: current.gateway,
+      previousStatus: previous,
+      status: current.status,
+      remoteChecked: Boolean(result.remoteChecked),
+      remoteError: result.remoteError || result.error || ''
+    });
+  }
+  return summary;
+}
+
 function paymentEventForStatus(status = '') {
   if (status === 'paid') return 'pix_confirmed';
   if (status === 'refunded') return 'pix_refunded';
@@ -1735,6 +1776,24 @@ async function processDispatchQueue() {
   }
 }
 
+function queueOfferDispatches(offer, body = {}, req = null) {
+  const eventName = toText(body.eventName || body.event || 'pix_confirmed', 80);
+  const transaction = STORE.transactions.find((tx) =>
+    tx.offerId === offer.id &&
+    (tx.id === body.transactionId || tx.txid === body.txid || tx.sessionId === body.sessionId)
+  ) || {};
+  const lead = transaction.leadId
+    ? findLeadForOffer(offer.id, transaction.leadId)
+    : findLeadForOffer(offer.id, body.leadId || body.sessionId || transaction.sessionId);
+  scheduleDispatches(offer, eventName, {
+    ...body,
+    transaction,
+    lead,
+    amount: toAmount(body.amount || transaction.amount || lead?.pixAmount || 0),
+    gateway: transaction.gateway || body.gateway || ''
+  }, req);
+}
+
 async function sendUtmify(offer, payload) {
   const cfg = offer?.settings?.utmify || {};
   if (!cfg.enabled || !cfg.endpoint || !cfg.apiKey) return { ok: true, skipped: true, reason: 'utmify_disabled' };
@@ -1949,14 +2008,166 @@ async function handleApi(req, res, pathname) {
     const offer = findOfferById(decodeURIComponent(collectionMatch[1]));
     if (!offer) return sendJson(res, 404, { ok: false, error: 'offer_not_found' });
     const collection = collectionMatch[2];
-    const rows = STORE[collection].filter((item) => item.offerId === offer.id).slice(-300).reverse();
+    let rows = STORE[collection].filter((item) => item.offerId === offer.id);
+    const q = normalizeStatus(req.query.q || '');
+    if (collection === 'leads' && q) {
+      rows = rows.filter((item) => normalizeStatus(JSON.stringify(item)).includes(q));
+    }
+    rows = rows.slice(-Number(req.query.limit || 300)).reverse();
     sendJson(res, 200, { ok: true, data: rows });
+    return;
+  }
+  const leadDetailMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/leads\/([^/]+)$/);
+  if (leadDetailMatch && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return;
+    const offer = findOfferById(decodeURIComponent(leadDetailMatch[1]));
+    if (!offer) return sendJson(res, 404, { ok: false, error: 'offer_not_found' });
+    const lead = findLeadForOffer(offer.id, decodeURIComponent(leadDetailMatch[2]));
+    if (!lead) return sendJson(res, 404, { ok: false, error: 'lead_not_found' });
+    const transactions = STORE.transactions.filter((tx) => tx.offerId === offer.id && (tx.leadId === lead.id || tx.sessionId === lead.sessionId));
+    const events = STORE.events.filter((event) => event.offerId === offer.id && event.sessionId === lead.sessionId).slice(-100).reverse();
+    const pageviews = STORE.pageviews.filter((pageview) => pageview.offerId === offer.id && pageview.sessionId === lead.sessionId).slice(-100).reverse();
+    sendJson(res, 200, { ok: true, lead, transactions, events, pageviews });
+    return;
+  }
+  const gatewayTestMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/gateway-test-pix$/);
+  if (gatewayTestMatch && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return;
+    const offer = findOfferById(decodeURIComponent(gatewayTestMatch[1]));
+    if (!offer) return sendJson(res, 404, { ok: false, error: 'offer_not_found' });
+    const body = await readJson(req).catch(() => ({}));
+    const selected = Array.isArray(body.gateways) && body.gateways.length
+      ? body.gateways.map((item) => normalizeStatus(item)).filter((item) => GATEWAYS.includes(item))
+      : resolveGatewayOrder(offer, body.gateway);
+    const results = [];
+    for (const gateway of selected) {
+      const result = await createPixForOffer(offer, {
+        ...body,
+        gateway,
+        amount: toAmount(body.amount || 1.99),
+        sessionId: `admin_test_${gateway}_${Date.now()}`,
+        customer: {
+          name: body.customer?.name || 'Teste LEOHUB',
+          email: body.customer?.email || 'teste@leohub.local',
+          document: body.customer?.document || '12345678909',
+          phone: body.customer?.phone || '11999999999'
+        },
+        utm: { utm_source: 'admin_gateway_test', ...(body.utm || {}) }
+      }, req).catch((error) => ({ ok: false, error: error?.message || 'gateway_test_error' }));
+      results.push({ gateway, ...sanitizeSecrets(result) });
+    }
+    sendJson(res, 200, { ok: results.some((item) => item.ok), results });
+    return;
+  }
+  const reconcileMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/pix-reconcile$/);
+  if (reconcileMatch && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return;
+    const offer = findOfferById(decodeURIComponent(reconcileMatch[1]));
+    if (!offer) return sendJson(res, 404, { ok: false, error: 'offer_not_found' });
+    const body = await readJson(req).catch(() => ({}));
+    const summary = await reconcileOfferPix(offer, body.limit || req.query.limit || 100, req);
+    sendJson(res, 200, { ok: true, ...summary });
+    return;
+  }
+  const dispatchOfferMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/dispatch-process$/);
+  if (dispatchOfferMatch && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return;
+    const offer = findOfferById(decodeURIComponent(dispatchOfferMatch[1]));
+    if (!offer) return sendJson(res, 404, { ok: false, error: 'offer_not_found' });
+    const body = await readJson(req).catch(() => ({}));
+    if (body.eventName || body.event || body.txid || body.transactionId || body.sessionId) queueOfferDispatches(offer, body, req);
+    await processDispatchQueue();
+    const pending = STORE.dispatches.filter((job) => job.offerId === offer.id && job.status === 'pending').length;
+    sendJson(res, 200, { ok: true, pending });
     return;
   }
   if (pathname === '/api/admin/dispatch/process' && req.method === 'POST') {
     if (!requireAdmin(req, res)) return;
     await processDispatchQueue();
     sendJson(res, 200, { ok: true, pending: STORE.dispatches.filter((job) => job.status === 'pending').length });
+    return;
+  }
+  if ((pathname === '/api/site/config' || pathname === '/api/offer/config') && req.method === 'GET') {
+    const offer = requireOffer(req, res);
+    if (!offer) return;
+    sendJson(res, 200, {
+      ok: true,
+      offer: publicOffer(offer),
+      config: publicOfferConfig(offer),
+      features: offer.settings?.features || {}
+    });
+    return;
+  }
+  if ((pathname === '/api/lead/track' || pathname === '/api/track') && req.method === 'POST') {
+    const offer = requireOffer(req, res);
+    if (!offer) return;
+    const body = await readJson(req);
+    const result = recordEvent(offer, body, req);
+    sendJson(res, 200, { ok: true, leadId: result.lead.id, eventId: result.event.id });
+    return;
+  }
+  if ((pathname === '/api/lead/pageview' || pathname === '/api/pageview') && req.method === 'POST') {
+    const offer = requireOffer(req, res);
+    if (!offer) return;
+    const body = await readJson(req);
+    const result = recordPageview(offer, body, req);
+    sendJson(res, 200, { ok: true, leadId: result.lead.id, pageviewId: result.pageview?.id || '', deduped: result.deduped });
+    return;
+  }
+  if (pathname === '/api/pix/create' && req.method === 'POST') {
+    const offer = requireOffer(req, res);
+    if (!offer) return;
+    const body = await readJson(req);
+    const result = await createPixForOffer(offer, body, req);
+    if (!result.ok) return sendJson(res, result.status || 502, result);
+    sendJson(res, 200, {
+      ok: true,
+      idTransaction: result.transaction.txid,
+      transactionId: result.transaction.id,
+      gateway: result.transaction.gateway,
+      amount: result.transaction.amount,
+      reused: Boolean(result.reused),
+      status: result.transaction.status,
+      paymentCode: result.transaction.paymentCode,
+      paymentCodeBase64: result.transaction.paymentCodeBase64,
+      paymentQrUrl: result.transaction.paymentQrUrl
+    });
+    return;
+  }
+  if (pathname === '/api/pix/status' && req.method === 'POST') {
+    const offer = requireOffer(req, res);
+    if (!offer) return;
+    const body = await readJson(req);
+    const result = await getPixStatus(offer, body, req);
+    if (!result.ok) return sendJson(res, result.status || 404, result);
+    sendJson(res, 200, {
+      ok: true,
+      idTransaction: result.transaction.txid,
+      transactionId: result.transaction.id,
+      status: result.transaction.status,
+      statusRaw: result.transaction.statusRaw,
+      amount: result.transaction.amount,
+      gateway: result.transaction.gateway,
+      remoteChecked: Boolean(result.remoteChecked),
+      remoteError: result.remoteError || '',
+      paymentCode: result.transaction.paymentCode,
+      paymentCodeBase64: result.transaction.paymentCodeBase64,
+      paymentQrUrl: result.transaction.paymentQrUrl
+    });
+    return;
+  }
+  if (pathname === '/api/pix/webhook' && req.method === 'POST') {
+    const gateway = normalizeStatus(req.query.gateway || req.query.provider || '');
+    if (!GATEWAYS.includes(gateway)) return sendJson(res, 400, { ok: false, error: 'invalid_gateway' });
+    const offer = findOfferById(req.query.offer_id || req.query.offerId || '') || getOfferFromRequest(req);
+    if (!offer) return sendJson(res, 401, { ok: false, error: 'invalid_offer' });
+    const config = asObject(offer.settings?.payments?.gateways?.[gateway]);
+    const expectedToken = toText(config.webhookToken || offer.privateKey, 300);
+    const receivedToken = toText(req.query.token || req.headers['x-leohub-webhook-token'], 300);
+    if (expectedToken && receivedToken !== expectedToken) return sendJson(res, 401, { ok: false, error: 'invalid_webhook_token' });
+    const body = await readJson(req).catch(() => ({}));
+    const result = updateTransactionStatus(offer, gateway, body, req.query, req);
+    sendJson(res, 200, { ok: true, status: result.transaction ? 'updated' : 'stored', webhookId: result.webhook.id, duplicate: Boolean(result.webhook.duplicate) });
     return;
   }
   if (pathname === '/api/v1/offer/config' && req.method === 'GET') {
