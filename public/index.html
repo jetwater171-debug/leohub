@@ -161,8 +161,33 @@
         </div>
 
         <div id="view-offers" class="view hidden">
-          <div class="split">
-            <section class="panel">
+          <div class="offers-stage">
+            <section class="panel offers-list-panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Ofertas cadastradas</h2>
+                  <p class="muted">Clique em uma oferta para abrir o admin completo dela.</p>
+                </div>
+                <button id="show-create-offer" class="primary" type="button">Criar nova oferta</button>
+              </div>
+              <div id="offers-card-grid" class="offers-card-grid"></div>
+              <div class="table-wrap hidden">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Oferta</th>
+                      <th>Leads</th>
+                      <th>PIX</th>
+                      <th>Pago</th>
+                      <th>Gateway</th>
+                    </tr>
+                  </thead>
+                  <tbody id="offers-table"></tbody>
+                </table>
+              </div>
+              <span id="offers-table-count" class="pill">0</span>
+            </section>
+            <section id="create-offer-panel" class="panel hidden">
               <div class="panel-head">
                 <h2>Criar oferta</h2>
                 <span class="pill">token automatico</span>
@@ -186,26 +211,6 @@
                 </label>
                 <button class="primary wide" type="submit">Criar oferta</button>
               </form>
-            </section>
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Ofertas cadastradas</h2>
-                <span id="offers-table-count" class="pill">0</span>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Oferta</th>
-                      <th>Leads</th>
-                      <th>PIX</th>
-                      <th>Pago</th>
-                      <th>Gateway</th>
-                    </tr>
-                  </thead>
-                  <tbody id="offers-table"></tbody>
-                </table>
-              </div>
             </section>
           </div>
         </div>

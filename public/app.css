@@ -445,6 +445,79 @@ textarea:focus {
   gap: 10px;
 }
 
+.offers-stage {
+  display: grid;
+  gap: 18px;
+}
+
+.offers-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.saas-offer-card {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(13, 30, 56, .94), rgba(4, 10, 22, .96));
+  box-shadow: 0 18px 70px rgba(0, 0, 0, .24);
+  cursor: pointer;
+}
+
+.saas-offer-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.saas-offer-top,
+.saas-offer-footer,
+.gateway-priority-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.saas-offer-top strong {
+  display: block;
+  margin: 4px 0;
+  font-size: 22px;
+}
+
+.saas-offer-top small,
+.saas-offer-footer {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.saas-offer-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.saas-offer-metrics span {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .03);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.saas-offer-metrics b {
+  color: var(--ink);
+  font-size: 15px;
+  text-transform: none;
+}
+
 .offer-card,
 .feed-item,
 .gateway-card {
@@ -651,6 +724,74 @@ tr:last-child td {
   gap: 12px;
 }
 
+.gateway-priority-head {
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.gateway-priority-head h3 {
+  margin: 0 0 4px;
+}
+
+.gateway-priority-head label {
+  min-width: 260px;
+}
+
+.gateway-priority-list {
+  display: grid;
+  gap: 10px;
+}
+
+.gateway-priority-item {
+  display: grid;
+  grid-template-columns: 42px minmax(180px, 1fr) 80px auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .035);
+}
+
+.gateway-priority-item.is-disabled {
+  opacity: .62;
+}
+
+.gateway-priority-index {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--blue), var(--blue-2));
+  color: #02101f;
+  font-weight: 950;
+}
+
+.gateway-priority-item strong,
+.gateway-priority-item small {
+  display: block;
+}
+
+.gateway-priority-item small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.gateway-priority-conv {
+  justify-self: end;
+  color: var(--blue-2);
+  font-weight: 950;
+}
+
+.gateway-priority-btn {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: #d9ecff;
+}
+
 .gateway-control-card {
   display: grid;
   gap: 14px;
@@ -771,7 +912,8 @@ tr:last-child td {
   .metric-grid,
   .offer-admin-grid,
   .module-grid,
-  .gateway-sales-mini {
+  .gateway-sales-mini,
+  .offers-card-grid {
     grid-template-columns: repeat(3, 1fr);
   }
 
@@ -821,13 +963,26 @@ tr:last-child td {
   .offer-admin-grid,
   .module-grid,
   .gateway-sales-mini,
+  .offers-card-grid,
   .control-grid,
   .form-grid,
   .key-grid,
   .gateway-card .form-grid,
   .form-grid.dense,
-  .gateway-control-head {
+  .gateway-control-head,
+  .saas-offer-metrics,
+  .gateway-priority-item {
     grid-template-columns: 1fr;
+  }
+
+  .saas-offer-top,
+  .saas-offer-footer,
+  .gateway-priority-head {
+    display: grid;
+  }
+
+  .gateway-priority-head label {
+    min-width: 0;
   }
 
   .tabs {

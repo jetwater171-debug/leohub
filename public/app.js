@@ -105,7 +105,10 @@ function setView(view) {
   };
   $('#view-title').textContent = titles[view] || 'LEOHUB';
   if (view === 'offer') renderOfferPanel();
-  if (view === 'offers') renderOfferOwnerSelect();
+  if (view === 'offers') {
+    renderOfferOwnerSelect();
+    renderOffersPage();
+  }
   if (view === 'integrations') renderSettingsForm();
   if (view === 'docs') renderDocs();
 }
@@ -227,6 +230,38 @@ function renderOfferOwnerSelect() {
     '<option value="">Sem usuario dono</option>',
     ...state.users.map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name)} - ${escapeHtml(user.email)}</option>`)
   ].join('');
+}
+
+function renderOffersPage() {
+  const grid = $('#offers-card-grid');
+  if (!grid) return;
+  $('#offers-table-count').textContent = state.offers.length;
+  grid.innerHTML = state.offers.map((offer) => {
+    const st = offer.stats || {};
+    const owner = offer.owner ? `${offer.owner.name} - ${offer.owner.email}` : 'Sem dono';
+    return `
+      <article class="saas-offer-card" data-open-offer="${escapeHtml(offer.id)}">
+        <div class="saas-offer-top">
+          <div>
+            <span class="eyebrow">Oferta</span>
+            <strong>${escapeHtml(offer.name)}</strong>
+            <small>${escapeHtml(offer.slug)} | ${escapeHtml(owner)}</small>
+          </div>
+          <span class="pill">${escapeHtml(offer.status || 'active')}</span>
+        </div>
+        <div class="saas-offer-metrics">
+          <span><b>${st.leads || 0}</b>Leads</span>
+          <span><b>${st.transactions || 0}</b>PIX</span>
+          <span><b>${st.paid || 0}</b>Pagos</span>
+          <span><b>${money(st.revenue || 0)}</b>Receita</span>
+        </div>
+        <div class="saas-offer-footer">
+          <span>Gateway atual: <b>${escapeHtml(st.topGateway || offer.settings?.payments?.activeGateway || '-')}</b></span>
+          <button class="secondary" type="button">Abrir admin</button>
+        </div>
+      </article>
+    `;
+  }).join('') || '<p class="muted">Nenhuma oferta cadastrada. Clique em criar nova oferta.</p>';
 }
 
 async function renderOfferPanel() {
@@ -832,18 +867,40 @@ function renderGatewaysControl(offer) {
   const payments = settings.payments || {};
   const gateways = payments.gateways || {};
   const insights = offer.insights?.gatewayStats || {};
+  const order = (payments.gatewayOrder && payments.gatewayOrder.length ? payments.gatewayOrder : Object.keys(gatewayNames))
+    .filter((gateway, index, list) => gatewayNames[gateway] && list.indexOf(gateway) === index);
   setOfferModuleHtml('Gateways da oferta', `${Object.keys(gatewayNames).length} gateways`, `
     <form class="module-form" data-offer-module-form="gateways">
       <div class="control-card">
-        <div class="form-grid">
+        <div class="gateway-priority-head">
+          <div>
+            <h3>Prioridade de tentativa</h3>
+            <p class="muted">A LEOHUB tenta o primeiro gateway. Se falhar, cai para o proximo automaticamente.</p>
+          </div>
           <label>Gateway ativo
             <select name="payments.activeGateway">
               ${Object.keys(gatewayNames).map((gateway) => `<option value="${gateway}" ${payments.activeGateway === gateway ? 'selected' : ''}>${gatewayNames[gateway]}</option>`).join('')}
             </select>
           </label>
-          <label>Ordem de fallback
-            <input name="payments.gatewayOrderText" value="${escapeHtml((payments.gatewayOrder || []).join(','))}">
-          </label>
+        </div>
+        <input type="hidden" name="payments.gatewayOrderText" value="${escapeHtml(order.join(','))}">
+        <div class="gateway-priority-list">
+          ${order.map((gateway, index) => {
+            const stats = insights[gateway] || {};
+            const cfg = gateways[gateway] || {};
+            return `
+              <article class="gateway-priority-item ${cfg.enabled ? '' : 'is-disabled'}">
+                <span class="gateway-priority-index">${index + 1}</span>
+                <div>
+                  <strong>${gatewayNames[gateway]}</strong>
+                  <small>${cfg.enabled ? 'Ativo' : 'Desativado'} | ${stats.paid || 0} pagos / ${stats.generated || 0} PIX</small>
+                </div>
+                <span class="gateway-priority-conv">${stats.generated ? Math.round(((stats.paid || 0) / stats.generated) * 100) : 0}%</span>
+                <button type="button" class="ghost gateway-priority-btn" data-gateway-move="${gateway}" data-direction="up">Subir</button>
+                <button type="button" class="ghost gateway-priority-btn" data-gateway-move="${gateway}" data-direction="down">Descer</button>
+              </article>
+            `;
+          }).join('')}
         </div>
       </div>
       <div class="gateway-control-list">
@@ -1183,6 +1240,36 @@ function bindEvents() {
     const offerTab = event.target.closest('[data-offer-tab]');
     if (offerTab) {
       await renderOfferCollection(offerTab.dataset.offerTab);
+      return;
+    }
+    const showCreateOffer = event.target.closest('#show-create-offer');
+    if (showCreateOffer) {
+      $('#create-offer-panel')?.classList.toggle('hidden');
+      return;
+    }
+    const gatewayMove = event.target.closest('[data-gateway-move]');
+    if (gatewayMove) {
+      const input = document.querySelector('[name="payments.gatewayOrderText"]');
+      const current = String(input?.value || '').split(',').map((item) => item.trim()).filter(Boolean);
+      const gateway = gatewayMove.getAttribute('data-gateway-move');
+      const dir = gatewayMove.getAttribute('data-direction');
+      const index = current.indexOf(gateway);
+      const target = dir === 'up' ? index - 1 : index + 1;
+      if (input && index >= 0 && target >= 0 && target < current.length) {
+        const next = [...current];
+        [next[index], next[target]] = [next[target], next[index]];
+        input.value = next.join(',');
+        const list = gatewayMove.closest('.gateway-priority-list');
+        const item = gatewayMove.closest('.gateway-priority-item');
+        const sibling = dir === 'up' ? item?.previousElementSibling : item?.nextElementSibling;
+        if (list && item && sibling) {
+          if (dir === 'up') list.insertBefore(item, sibling);
+          else list.insertBefore(sibling, item);
+          Array.from(list.querySelectorAll('.gateway-priority-index')).forEach((node, idx) => {
+            node.textContent = String(idx + 1);
+          });
+        }
+      }
       return;
     }
     const jump = event.target.closest('[data-view-jump]');
