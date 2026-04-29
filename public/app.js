@@ -544,8 +544,7 @@ function renderWebhooksTable(rows) {
 const gatewayNames = {
   atomopay: 'AtomoPay',
   paradise: 'Paradise',
-  sunize: 'Sunize',
-  ghostspay: 'GhostsPay'
+  sunize: 'Sunize'
 };
 
 function renderSettingsForm() {
@@ -580,7 +579,7 @@ function renderSettingsForm() {
   setField(form, 'backredirects.enabled', Boolean(settings.backredirects?.enabled));
   setField(form, 'backredirects.urlsText', (settings.backredirects?.urls || []).join('\n'));
 
-  $('#gateway-configs').innerHTML = ['atomopay', 'paradise', 'sunize', 'ghostspay'].map((gateway) => {
+  $('#gateway-configs').innerHTML = Object.keys(gatewayNames).map((gateway) => {
     const cfg = settings.payments?.gateways?.[gateway] || {};
     return `
       <article class="gateway-card" data-gateway="${gateway}">

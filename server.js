@@ -17,7 +17,7 @@ const USE_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_SERVICE_KEY);
 
 const JSON_LIMIT_BYTES = Number(process.env.LEOHUB_JSON_LIMIT_BYTES || 1024 * 1024);
 const TERMINAL_EVENTS = new Set(['pix_confirmed', 'pix_refunded', 'pix_refused', 'purchase']);
-const GATEWAYS = ['ghostspay', 'sunize', 'paradise', 'atomopay'];
+const GATEWAYS = ['atomopay', 'paradise', 'sunize'];
 const STATE_ID = 'main';
 
 function nowIso() {
@@ -120,12 +120,11 @@ function defaultOfferSettings() {
     },
     payments: {
       activeGateway: 'atomopay',
-      gatewayOrder: ['atomopay', 'paradise', 'sunize', 'ghostspay'],
+      gatewayOrder: ['atomopay', 'paradise', 'sunize'],
       gateways: {
         atomopay: defaultGatewayConfig(),
         paradise: defaultGatewayConfig(),
-        sunize: defaultGatewayConfig(),
-        ghostspay: defaultGatewayConfig()
+        sunize: defaultGatewayConfig()
       }
     },
     meta: {
@@ -694,6 +693,9 @@ function normalizeOfferInput(input = {}, existing = null) {
     ...asObject(existing?.settings?.payments?.gateways),
     ...asObject(input.settings?.payments?.gateways)
   };
+  Object.keys(settings.payments.gateways).forEach((gateway) => {
+    if (!GATEWAYS.includes(gateway)) delete settings.payments.gateways[gateway];
+  });
   for (const gateway of GATEWAYS) {
     settings.payments.gateways[gateway] = {
       ...defaultGatewayConfig(),
@@ -903,7 +905,6 @@ function resolveGatewayOrder(offer, requested = '') {
 
 function gatewayHasCredentials(gateway, config = {}) {
   if (config.mockMode) return true;
-  if (gateway === 'ghostspay') return Boolean(config.basicAuthBase64 || (config.secretKey && config.companyId));
   if (gateway === 'sunize') return Boolean(config.apiKey && config.apiSecret);
   if (gateway === 'paradise') return Boolean(config.apiKey);
   if (gateway === 'atomopay') return Boolean(config.apiToken && config.offerHash && config.productHash);
@@ -1025,6 +1026,29 @@ function buildWebhookUrl(offer, gateway, config = {}) {
   return `${BASE_URL}/api/v1/webhooks/${gateway}?offer_id=${encodeURIComponent(offer.id)}&token=${encodeURIComponent(token)}`;
 }
 
+function baseUrl(value, fallback) {
+  return String(value || fallback).replace(/\/+$/, '');
+}
+
+function normalizePhoneE164(value = '') {
+  const digits = onlyDigits(value, 20);
+  if (!digits) return '+5511999999999';
+  if (digits.startsWith('55') && digits.length >= 12) return `+${digits}`;
+  return `+55${digits}`;
+}
+
+function buildGatewayItems(config = {}, payload = {}) {
+  const rawItems = Array.isArray(payload.items) && payload.items.length
+    ? payload.items
+    : [{ title: payload.title || payload.offer?.name || 'Oferta LEOHUB', price: payload.amount, quantity: 1 }];
+  return rawItems.map((item) => ({
+    id: toText(item.id || item.productId || item.productHash || config.productHash, 120),
+    title: toText(item.title || item.name || payload.offer?.name || 'Oferta LEOHUB', 180),
+    price: toAmount(item.price || item.amount || payload.amount),
+    quantity: Math.max(1, Number(item.quantity || 1))
+  }));
+}
+
 function mockPixPayload(gateway, payload = {}) {
   const txid = `${gateway}_${crypto.randomBytes(10).toString('hex')}`;
   return {
@@ -1048,7 +1072,6 @@ async function callGatewayCreate(gateway, config = {}, payload = {}) {
   if (gateway === 'atomopay') return createAtomopay(config, payload);
   if (gateway === 'sunize') return createSunize(config, payload);
   if (gateway === 'paradise') return createParadise(config, payload);
-  if (gateway === 'ghostspay') return createGhostspay(config, payload);
   return { ok: false, error: 'unsupported_gateway' };
 }
 
@@ -1071,9 +1094,10 @@ async function fetchJson(url, options = {}, timeoutMs = 12000) {
 }
 
 async function createAtomopay(config, payload) {
-  const url = new URL(`${config.baseUrl || 'https://api.atomopay.com.br/api/public/v1'}/transactions`);
+  const url = new URL(`${baseUrl(config.baseUrl, 'https://api.atomopay.com.br/api/public/v1')}/transactions`);
   url.searchParams.set('api_token', config.apiToken);
   const amountCents = cents(payload.amount);
+  const items = buildGatewayItems(config, payload);
   const body = {
     amount: amountCents,
     offer_hash: config.offerHash,
@@ -1084,11 +1108,11 @@ async function createAtomopay(config, payload) {
       phone_number: payload.customer.phone,
       document: payload.customer.document
     },
-    cart: (payload.items || [{ title: payload.title || 'Oferta LEOHUB', price: payload.amount, quantity: 1 }]).map((item) => ({
-      product_hash: item.productHash || config.productHash,
-      title: item.title || 'Oferta LEOHUB',
-      price: cents(item.price || payload.amount),
-      quantity: Number(item.quantity || 1),
+    cart: items.map((item) => ({
+      product_hash: item.id || config.productHash,
+      title: item.title,
+      price: cents(item.price),
+      quantity: item.quantity,
       operation_type: 1,
       tangible: false
     })),
@@ -1114,7 +1138,7 @@ async function createSunize(config, payload) {
     customer: {
       name: payload.customer.name,
       email: payload.customer.email,
-      phone: payload.customer.phone.startsWith('55') ? `+${payload.customer.phone}` : `+55${payload.customer.phone}`,
+      phone: normalizePhoneE164(payload.customer.phone),
       document: payload.customer.document,
       document_type: payload.customer.document.length > 11 ? 'CNPJ' : 'CPF'
     },
@@ -1125,7 +1149,7 @@ async function createSunize(config, payload) {
     },
     webhook_url: payload.webhookUrl
   };
-  const { response, data } = await fetchJson(`${config.baseUrl || 'https://api.sunize.com.br/v1'}/transactions`, {
+  const { response, data } = await fetchJson(`${baseUrl(config.baseUrl, 'https://api.sunize.com.br/v1')}/transactions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1139,11 +1163,12 @@ async function createSunize(config, payload) {
 }
 
 async function createParadise(config, payload) {
+  const source = toText(config.source, 80) || (config.productHash ? '' : 'api_externa');
   const body = {
     amount: cents(payload.amount),
     reference: payload.sessionId,
     productHash: config.productHash || undefined,
-    source: config.productHash ? undefined : 'api_externa',
+    source: source || undefined,
     customer: {
       name: payload.customer.name,
       email: payload.customer.email,
@@ -1153,7 +1178,9 @@ async function createParadise(config, payload) {
     postback_url: payload.webhookUrl,
     tracking: payload.utm || {}
   };
-  const { response, data } = await fetchJson(`${config.baseUrl || 'https://multi.paradisepags.com'}/api/v1/transaction.php`, {
+  if (config.orderbumpHash && payload.orderbump) body.orderbump = config.orderbumpHash;
+  if (config.description) body.description = config.description;
+  const { response, data } = await fetchJson(`${baseUrl(config.baseUrl, 'https://multi.paradisepags.com')}/api/v1/transaction.php`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1165,37 +1192,6 @@ async function createParadise(config, payload) {
     return { ok: false, error: 'paradise_create_failed', detail: data };
   }
   return normalizePixResponse('paradise', data);
-}
-
-async function createGhostspay(config, payload) {
-  const auth = config.basicAuthBase64 || Buffer.from(`${config.secretKey}:${config.companyId}`).toString('base64');
-  const body = {
-    amount: cents(payload.amount),
-    paymentMethod: 'pix',
-    customer: {
-      name: payload.customer.name,
-      email: payload.customer.email,
-      document: payload.customer.document,
-      phone: payload.customer.phone
-    },
-    metadata: {
-      offerId: payload.offer.id,
-      sessionId: payload.sessionId,
-      ...(payload.utm || {})
-    },
-    postbackUrl: payload.webhookUrl,
-    items: payload.items || [{ title: payload.title || 'Oferta LEOHUB', quantity: 1, unitPrice: cents(payload.amount) }]
-  };
-  const { response, data } = await fetchJson(`${config.baseUrl || 'https://api.ghostspaysv1.com/api/v1'}/transactions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Basic ${auth}`
-    },
-    body: JSON.stringify(body)
-  }, config.timeoutMs);
-  if (!response.ok) return { ok: false, error: 'ghostspay_create_failed', detail: data };
-  return normalizePixResponse('ghostspay', data);
 }
 
 function normalizePixResponse(gateway, data = {}) {
@@ -1211,6 +1207,11 @@ function normalizePixResponse(gateway, data = {}) {
     source.transactionHash,
     source.transaction_id,
     source.transactionId,
+    source.id_transaction,
+    source.idTransaction,
+    source.payment_id,
+    source.transaction_id,
+    source.transactionId,
     source.id,
     transaction.hash,
     transaction.id,
@@ -1221,6 +1222,10 @@ function normalizePixResponse(gateway, data = {}) {
   const paymentCode = pickText(
     source.pix_code,
     source.pixCode,
+    source.pix_payload,
+    source.pixPayload,
+    source.copy_paste,
+    source.copyPaste,
     source.qr_code,
     source.qrCode,
     source.paymentCode,
@@ -1235,6 +1240,8 @@ function normalizePixResponse(gateway, data = {}) {
     source.qr_code_base64,
     source.qrcode_base64,
     source.qrCodeBase64,
+    source.pix_qr_code,
+    source.pixQrCode,
     source.paymentCodeBase64,
     pix.qrcode,
     pix.qrCode,
@@ -1244,13 +1251,13 @@ function normalizePixResponse(gateway, data = {}) {
   );
   const paymentQrUrl = /^https?:\/\//i.test(qrRaw) || qrRaw.startsWith('data:image') ? qrRaw : pickText(pix.qrcodeUrl, pix.qrCodeUrl, source.paymentQrUrl);
   const paymentCodeBase64 = paymentQrUrl ? '' : qrRaw;
-  const statusRaw = pickText(source.status, source.raw_status, transaction.status, payment.status) || 'waiting_payment';
+  const statusRaw = pickText(source.status, source.raw_status, source.rawStatus, transaction.status, payment.status) || 'waiting_payment';
   if (!txid) return { ok: false, error: `${gateway}_missing_txid`, detail: data };
   if (!paymentCode && !paymentCodeBase64 && !paymentQrUrl) return { ok: false, error: `${gateway}_missing_pix_visual`, detail: data };
   return {
     ok: true,
     txid,
-    externalId: pickText(source.external_id, source.externalId, source.reference),
+    externalId: pickText(source.external_id, source.externalId, source.reference, source.ref, transaction.external_id, transaction.externalId),
     status: mapPaymentStatus(statusRaw),
     statusRaw,
     paymentCode,
@@ -1262,10 +1269,75 @@ function normalizePixResponse(gateway, data = {}) {
 
 function mapPaymentStatus(statusRaw = '') {
   const status = normalizeStatus(statusRaw);
-  if (/paid|approved|authorized|confirm|complete|success/.test(status)) return 'paid';
+  if (/paid|approved|authorized|confirm|complete|success|payment_approved/.test(status)) return 'paid';
   if (/refund|refunded/.test(status)) return 'refunded';
-  if (/refus|fail|cancel|expired|chargeback|chargedback|denied/.test(status)) return 'refused';
+  if (/chargeback|chargedback/.test(status)) return 'chargedback';
+  if (/refus|fail|cancel|expired|denied|canceled|cancelled/.test(status)) return 'refused';
   return 'waiting_payment';
+}
+
+function isTerminalPaymentStatus(status = '') {
+  return ['paid', 'refunded', 'refused', 'chargedback'].includes(String(status || ''));
+}
+
+async function callGatewayStatus(gateway, config = {}, tx = {}) {
+  const txid = pickText(tx.txid, tx.externalId);
+  if (!txid) return { ok: false, error: 'missing_txid' };
+  if (config.mockMode) return { ok: true, status: tx.status, statusRaw: tx.statusRaw, raw: { mock: true } };
+  if (gateway === 'atomopay') {
+    const url = new URL(`${baseUrl(config.baseUrl, 'https://api.atomopay.com.br/api/public/v1')}/transactions/${encodeURIComponent(txid)}`);
+    url.searchParams.set('api_token', config.apiToken);
+    const { response, data } = await fetchJson(url.toString(), { method: 'GET' }, config.timeoutMs);
+    if (!response.ok || data?.success === false) return { ok: false, error: 'atomopay_status_failed', detail: data };
+    return normalizeStatusResponse(gateway, data);
+  }
+  if (gateway === 'sunize') {
+    const { response, data } = await fetchJson(`${baseUrl(config.baseUrl, 'https://api.sunize.com.br/v1')}/transactions/${encodeURIComponent(txid)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'x-api-secret': config.apiSecret
+      }
+    }, config.timeoutMs);
+    if (!response.ok) return { ok: false, error: 'sunize_status_failed', detail: data };
+    return normalizeStatusResponse(gateway, data);
+  }
+  if (gateway === 'paradise') {
+    const url = new URL(`${baseUrl(config.baseUrl, 'https://multi.paradisepags.com')}/api/v1/query.php`);
+    url.searchParams.set('action', 'get_transaction');
+    url.searchParams.set('id', txid);
+    const { response, data } = await fetchJson(url.toString(), {
+      method: 'GET',
+      headers: { 'X-API-Key': config.apiKey }
+    }, config.timeoutMs);
+    if (!response.ok || data?.success === false || String(data?.status || '').toLowerCase() === 'error') {
+      return { ok: false, error: 'paradise_status_failed', detail: data };
+    }
+    return normalizeStatusResponse(gateway, data);
+  }
+  return { ok: false, error: 'unsupported_gateway' };
+}
+
+function normalizeStatusResponse(gateway, data = {}) {
+  const root = asObject(data);
+  const nested = asObject(root.data);
+  const transaction = asObject(root.transaction || nested.transaction);
+  const payment = asObject(root.payment || nested.payment);
+  const source = Object.keys(nested).length ? nested : root;
+  const statusRaw = pickText(source.status, source.raw_status, source.rawStatus, transaction.status, payment.status) || 'waiting_payment';
+  const pixNormalized = normalizePixResponse(gateway, data);
+  return {
+    ok: true,
+    txid: pickText(pixNormalized.txid, source.hash, source.transaction_id, source.id, transaction.id),
+    externalId: pickText(pixNormalized.externalId, source.external_id, source.externalId, source.reference),
+    status: mapPaymentStatus(statusRaw),
+    statusRaw,
+    paymentCode: pixNormalized.ok ? pixNormalized.paymentCode : '',
+    paymentCodeBase64: pixNormalized.ok ? pixNormalized.paymentCodeBase64 : '',
+    paymentQrUrl: pixNormalized.ok ? pixNormalized.paymentQrUrl : '',
+    raw: data
+  };
 }
 
 function toUtmifyDate(value) {
@@ -1312,13 +1384,81 @@ async function getPixStatus(offer, body = {}, req = null) {
   const txid = pickText(body.txid, body.idTransaction, body.transactionId);
   const transaction = STORE.transactions.find((item) => item.offerId === offer.id && (item.txid === txid || item.id === txid));
   if (!transaction) return { ok: false, status: 404, error: 'transaction_not_found' };
+  if (isTerminalPaymentStatus(transaction.status)) return { ok: true, transaction };
+  const config = asObject(offer.settings?.payments?.gateways?.[transaction.gateway]);
+  if (gatewayHasCredentials(transaction.gateway, config)) {
+    const remote = await callGatewayStatus(transaction.gateway, config, transaction).catch((error) => ({
+      ok: false,
+      error: error?.message || 'gateway_status_error'
+    }));
+    if (remote?.ok) {
+      const previousStatus = transaction.status;
+      let updated = null;
+      writeStore((store) => {
+        const tx = store.transactions.find((item) => item.id === transaction.id);
+        if (!tx) return;
+        tx.status = remote.status || tx.status;
+        tx.statusRaw = remote.statusRaw || tx.statusRaw;
+        if (remote.paymentCode) tx.paymentCode = remote.paymentCode;
+        if (remote.paymentCodeBase64) tx.paymentCodeBase64 = remote.paymentCodeBase64;
+        if (remote.paymentQrUrl) tx.paymentQrUrl = remote.paymentQrUrl;
+        tx.statusPayload = remote.raw || {};
+        tx.updatedAt = nowIso();
+        updated = clone(tx);
+      });
+      if (updated && updated.status !== previousStatus) {
+        applyPaymentSideEffects(offer, updated, updated.gateway, remote.raw || {}, req);
+      }
+      return { ok: true, transaction: updated || transaction, remoteChecked: true };
+    }
+    return { ok: true, transaction, remoteChecked: false, remoteError: remote.error || 'gateway_status_failed' };
+  }
   return { ok: true, transaction };
+}
+
+function paymentEventForStatus(status = '') {
+  if (status === 'paid') return 'pix_confirmed';
+  if (status === 'refunded') return 'pix_refunded';
+  if (status === 'refused') return 'pix_refused';
+  if (status === 'chargedback') return 'pix_chargeback';
+  return 'pix_pending';
+}
+
+function applyPaymentSideEffects(offer, transaction, gateway, rawPayload = {}, req = null) {
+  const status = transaction.status || 'waiting_payment';
+  const lead = STORE.leads.find((item) => item.id === transaction.leadId || (item.offerId === offer.id && item.sessionId === transaction.sessionId));
+  if (lead) {
+    upsertLead(offer, {
+      sessionId: lead.sessionId,
+      event: paymentEventForStatus(status),
+      stage: 'pix',
+      pixTxid: transaction.txid,
+      pixAmount: transaction.amount,
+      gateway,
+      pix: {
+        idTransaction: transaction.txid,
+        amount: transaction.amount,
+        status,
+        statusRaw: transaction.statusRaw,
+        gateway
+      }
+    }, req);
+  }
+  if (status === 'paid') {
+    scheduleDispatches(offer, 'pix_confirmed', { transaction, lead, gateway, amount: transaction.amount, statusChangedAt: transaction.updatedAt }, req);
+  } else if (status === 'refunded') {
+    scheduleDispatches(offer, 'pix_refunded', { transaction, lead, gateway, amount: transaction.amount, statusChangedAt: transaction.updatedAt }, req);
+  } else if (status === 'refused' || status === 'chargedback') {
+    scheduleDispatches(offer, 'pix_refused', { transaction, lead, gateway, amount: transaction.amount, statusChangedAt: transaction.updatedAt, rawPayload }, req);
+  }
 }
 
 function updateTransactionStatus(offer, gateway, rawBody = {}, query = {}, req = null) {
   const txid = extractWebhookTxid(gateway, rawBody);
   const statusRaw = extractWebhookStatus(gateway, rawBody);
   const status = mapPaymentStatus(statusRaw);
+  const signature = `${gateway}:${txid}:${normalizeStatus(statusRaw)}`;
+  const duplicate = STORE.webhooks.some((item) => item.offerId === offer.id && item.signature === signature);
   const webhook = {
     id: id('wh'),
     offerId: offer.id,
@@ -1326,6 +1466,8 @@ function updateTransactionStatus(offer, gateway, rawBody = {}, query = {}, req =
     txid,
     status,
     statusRaw,
+    signature,
+    duplicate,
     query,
     payload: rawBody,
     createdAt: nowIso()
@@ -1333,6 +1475,7 @@ function updateTransactionStatus(offer, gateway, rawBody = {}, query = {}, req =
   let transaction = null;
   writeStore((store) => {
     store.webhooks.push(webhook);
+    if (duplicate) return;
     transaction = store.transactions.find((item) => item.offerId === offer.id && (item.txid === txid || item.externalId === txid));
     if (transaction) {
       transaction.status = status;
@@ -1342,46 +1485,26 @@ function updateTransactionStatus(offer, gateway, rawBody = {}, query = {}, req =
     }
   });
   if (transaction) {
-    const lead = STORE.leads.find((item) => item.id === transaction.leadId || (item.offerId === offer.id && item.sessionId === transaction.sessionId));
-    if (lead) {
-      upsertLead(offer, {
-        sessionId: lead.sessionId,
-        event: status === 'paid' ? 'pix_confirmed' : status === 'refunded' ? 'pix_refunded' : status === 'refused' ? 'pix_refused' : 'pix_pending',
-        stage: 'pix',
-        pixTxid: transaction.txid,
-        pixAmount: transaction.amount,
-        gateway,
-        pix: {
-          idTransaction: transaction.txid,
-          amount: transaction.amount,
-          status,
-          statusRaw,
-          gateway
-        }
-      }, req);
-    }
-    if (status === 'paid') {
-      scheduleDispatches(offer, 'pix_confirmed', { transaction, lead, gateway, amount: transaction.amount }, req);
-    }
+    applyPaymentSideEffects(offer, transaction, gateway, rawBody, req);
   }
   return { webhook, transaction };
 }
 
 function extractWebhookTxid(gateway, body = {}) {
   if (gateway === 'atomopay') {
-    return pickText(body.hash, body.transaction_hash, body.transactionHash, body.data?.hash, body.data?.transaction_hash);
+    return pickText(body.hash, body.transaction_hash, body.transactionHash, body.data?.hash, body.data?.transaction_hash, body.transaction?.hash, body.payment?.hash);
   }
   if (gateway === 'sunize') {
-    return pickText(body.id, body.transaction_id, body.transactionId, body.data?.id);
+    return pickText(body.id, body.transaction_id, body.transactionId, body.data?.id, body.transaction?.id, body.external_id, body.externalId);
   }
   if (gateway === 'paradise') {
-    return pickText(body.transaction_id, body.transactionId, body.id, body.external_id, body.externalId);
+    return pickText(body.transaction_id, body.transactionId, body.id, body.data?.transaction_id, body.data?.id, body.external_id, body.externalId, body.reference);
   }
   return pickText(body.id, body.transactionId, body.transaction_id, body.data?.id, body.objectId);
 }
 
 function extractWebhookStatus(gateway, body = {}) {
-  return pickText(body.status, body.raw_status, body.data?.status, body.transaction?.status, body.payment?.status) || 'waiting_payment';
+  return pickText(body.status, body.raw_status, body.rawStatus, body.data?.status, body.transaction?.status, body.payment?.status, body.event) || 'waiting_payment';
 }
 
 function scheduleDispatches(offer, eventName, payload = {}, req = null) {
@@ -1878,6 +2001,8 @@ async function handleApi(req, res, pathname) {
       statusRaw: result.transaction.statusRaw,
       amount: result.transaction.amount,
       gateway: result.transaction.gateway,
+      remoteChecked: Boolean(result.remoteChecked),
+      remoteError: result.remoteError || '',
       paymentCode: result.transaction.paymentCode,
       paymentCodeBase64: result.transaction.paymentCodeBase64,
       paymentQrUrl: result.transaction.paymentQrUrl
@@ -1988,12 +2113,11 @@ function ensureSeedOffer() {
     settings: {
       payments: {
         activeGateway: 'atomopay',
-        gatewayOrder: ['atomopay', 'paradise', 'sunize', 'ghostspay'],
+        gatewayOrder: ['atomopay', 'paradise', 'sunize'],
         gateways: {
           atomopay: { ...defaultGatewayConfig(), enabled: true, mockMode: true },
           paradise: { ...defaultGatewayConfig(), enabled: true, mockMode: true },
-          sunize: { ...defaultGatewayConfig(), enabled: true, mockMode: true },
-          ghostspay: { ...defaultGatewayConfig(), enabled: true, mockMode: true }
+          sunize: { ...defaultGatewayConfig(), enabled: true, mockMode: true }
         }
       }
     }
