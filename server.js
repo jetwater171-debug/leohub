@@ -1012,6 +1012,7 @@ async function createPixForOffer(offer, body = {}, req = null) {
         sessionId,
         customer,
         offer,
+        req,
         webhookUrl: buildWebhookUrl(offer, gateway, config)
       });
       if (!result.ok) {
@@ -1099,6 +1100,22 @@ function normalizePhoneE164(value = '') {
   return `+55${digits}`;
 }
 
+function extractIp(req = null) {
+  const forwarded = String(req?.headers?.['x-forwarded-for'] || '').trim();
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return String(req?.socket?.remoteAddress || '').trim();
+}
+
+function buildUtmFields(source = {}) {
+  const raw = asObject(source.utm || source);
+  const fields = {};
+  for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'src', 'sck', 'fbclid', 'gclid', 'ttclid']) {
+    const value = pickText(raw[key], source[key]);
+    if (value) fields[key] = value;
+  }
+  return fields;
+}
+
 function buildGatewayItems(config = {}, payload = {}) {
   const rawItems = Array.isArray(payload.items) && payload.items.length
     ? payload.items
@@ -1136,6 +1153,34 @@ async function fetchJson(url, options = {}, timeoutMs = 12000) {
   }
 }
 
+async function fetchJsonWithRetry(url, options = {}, timeoutMs = 12000, attempts = 3) {
+  let last = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    last = await fetchJson(url, options, timeoutMs);
+    if (last.response?.ok) return last;
+    const status = Number(last.response?.status || 0);
+    const retryable = status === 408 || status === 429 || status >= 500 || !status;
+    if (!retryable || attempt === attempts - 1) return last;
+    await new Promise((resolve) => setTimeout(resolve, 450 * (attempt + 1)));
+  }
+  return last || { response: { ok: false, status: 500 }, data: { error: 'request_failed' } };
+}
+
+async function hydratePixVisual(gateway, config = {}, txid = '') {
+  const cleanTxid = toText(txid, 180);
+  if (!cleanTxid) return null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const quickConfig = {
+      ...config,
+      timeoutMs: Math.max(1200, Math.min(Number(config.timeoutMs || 12000), attempt === 0 ? 3500 : 5000))
+    };
+    const status = await callGatewayStatus(gateway, quickConfig, { txid: cleanTxid }).catch(() => null);
+    if (status?.ok && (status.paymentCode || status.paymentCodeBase64 || status.paymentQrUrl)) return status;
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+  }
+  return null;
+}
+
 async function createAtomopay(config, payload) {
   const url = new URL(`${baseUrl(config.baseUrl, 'https://api.atomopay.com.br/api/public/v1')}/transactions`);
   url.searchParams.set('api_token', config.apiToken);
@@ -1164,35 +1209,59 @@ async function createAtomopay(config, payload) {
     postback_url: payload.webhookUrl
   };
   if (payload.utm && Object.keys(payload.utm).length) body.tracking = payload.utm;
-  const { response, data } = await fetchJson(url, {
+  const { response, data } = await fetchJsonWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   }, config.timeoutMs);
   if (!response.ok || data?.success === false) return { ok: false, error: 'atomopay_create_failed', detail: data };
-  return normalizePixResponse('atomopay', data);
+  const normalized = normalizePixResponse('atomopay', data);
+  if ((!normalized.ok && normalized.error === 'atomopay_missing_pix_visual') || (normalized.ok && !normalized.paymentCode && !normalized.paymentCodeBase64 && !normalized.paymentQrUrl)) {
+    const hydrated = await hydratePixVisual('atomopay', config, normalized.txid);
+    if (hydrated?.ok) return { ...normalized, ...hydrated, ok: true, raw: data };
+  }
+  return normalized;
 }
 
 async function createSunize(config, payload) {
-  const body = {
-    amount: cents(payload.amount),
+  const amount = toAmount(payload.amount);
+  const externalId = `${payload.sessionId || id('order')}-${Date.now()}`;
+  const utmFields = buildUtmFields(payload);
+  const items = buildGatewayItems(config, payload).map((item, index) => ({
+    id: `${toText(item.id, 80) || 'item'}-${index + 1}`,
+    title: item.title,
+    description: item.title,
+    price: Number(toAmount(item.price || amount).toFixed(2)),
+    quantity: item.quantity,
+    is_physical: false
+  }));
+  const baseBody = {
+    external_id: externalId,
+    total_amount: Number(amount.toFixed(2)),
     payment_method: 'PIX',
-    external_id: payload.sessionId,
+    items,
+    ip: extractIp(payload.req),
     customer: {
       name: payload.customer.name,
       email: payload.customer.email,
       phone: normalizePhoneE164(payload.customer.phone),
-      document: payload.customer.document,
-      document_type: payload.customer.document.length > 11 ? 'CNPJ' : 'CPF'
-    },
+      document_type: payload.customer.document.length > 11 ? 'CNPJ' : 'CPF',
+      document: payload.customer.document
+    }
+  };
+  const body = {
+    ...baseBody,
+    ...utmFields,
     metadata: {
+      orderId: payload.sessionId,
       offerId: payload.offer.id,
       sessionId: payload.sessionId,
-      ...(payload.utm || {})
+      ...utmFields
     },
     webhook_url: payload.webhookUrl
   };
-  const { response, data } = await fetchJson(`${baseUrl(config.baseUrl, 'https://api.sunize.com.br/v1')}/transactions`, {
+  const endpoint = `${baseUrl(config.baseUrl, 'https://api.sunize.com.br/v1')}/transactions`;
+  let { response, data } = await fetchJsonWithRetry(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1201,15 +1270,45 @@ async function createSunize(config, payload) {
     },
     body: JSON.stringify(body)
   }, config.timeoutMs);
-  if (!response.ok) return { ok: false, error: 'sunize_create_failed', detail: data };
-  return normalizePixResponse('sunize', data);
+  if (Number(response?.status || 0) === 400 && Object.keys(utmFields).length) {
+    ({ response, data } = await fetchJsonWithRetry(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'x-api-secret': config.apiSecret
+      },
+      body: JSON.stringify({ ...baseBody, metadata: body.metadata, webhook_url: payload.webhookUrl })
+    }, config.timeoutMs));
+  }
+  if (Number(response?.status || 0) === 400) {
+    ({ response, data } = await fetchJsonWithRetry(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'x-api-secret': config.apiSecret
+      },
+      body: JSON.stringify(baseBody)
+    }, config.timeoutMs));
+  }
+  if (!response.ok || data?.hasError === true) return { ok: false, error: 'sunize_create_failed', detail: data };
+  const normalized = normalizePixResponse('sunize', data);
+  if (normalized.ok && !normalized.externalId) normalized.externalId = externalId;
+  if ((!normalized.ok && normalized.error === 'sunize_missing_pix_visual') || (normalized.ok && !normalized.paymentCode && !normalized.paymentCodeBase64 && !normalized.paymentQrUrl)) {
+    const hydrated = await hydratePixVisual('sunize', config, normalized.txid);
+    if (hydrated?.ok) return { ...normalized, ...hydrated, ok: true, externalId: normalized.externalId || externalId, raw: data };
+  }
+  return normalized;
 }
 
 async function createParadise(config, payload) {
   const source = toText(config.source, 80) || (config.productHash ? '' : 'api_externa');
+  const externalId = `${payload.sessionId || id('order')}-${Date.now()}`;
   const body = {
     amount: cents(payload.amount),
-    reference: payload.sessionId,
+    description: toText(config.description, 180) || payload.offer?.name || 'Oferta LEOHUB',
+    reference: externalId,
     productHash: config.productHash || undefined,
     source: source || undefined,
     customer: {
@@ -1219,11 +1318,15 @@ async function createParadise(config, payload) {
       phone: payload.customer.phone
     },
     postback_url: payload.webhookUrl,
-    tracking: payload.utm || {}
+    tracking: {
+      gateway: 'paradise',
+      orderId: payload.sessionId,
+      sessionId: payload.sessionId,
+      ...buildUtmFields(payload)
+    }
   };
   if (config.orderbumpHash && payload.orderbump) body.orderbump = config.orderbumpHash;
-  if (config.description) body.description = config.description;
-  const { response, data } = await fetchJson(`${baseUrl(config.baseUrl, 'https://multi.paradisepags.com')}/api/v1/transaction.php`, {
+  const { response, data } = await fetchJsonWithRetry(`${baseUrl(config.baseUrl, 'https://multi.paradisepags.com')}/api/v1/transaction.php`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1234,7 +1337,13 @@ async function createParadise(config, payload) {
   if (!response.ok || data?.success === false || String(data?.status || '').toLowerCase() === 'error') {
     return { ok: false, error: 'paradise_create_failed', detail: data };
   }
-  return normalizePixResponse('paradise', data);
+  const normalized = normalizePixResponse('paradise', data);
+  if (normalized.ok && !normalized.externalId) normalized.externalId = externalId;
+  if ((!normalized.ok && normalized.error === 'paradise_missing_pix_visual') || (normalized.ok && !normalized.paymentCode && !normalized.paymentCodeBase64 && !normalized.paymentQrUrl)) {
+    const hydrated = await hydratePixVisual('paradise', config, normalized.txid);
+    if (hydrated?.ok) return { ...normalized, ...hydrated, ok: true, externalId: normalized.externalId || externalId, raw: data };
+  }
+  return normalized;
 }
 
 function normalizePixResponse(gateway, data = {}) {
@@ -1295,12 +1404,24 @@ function normalizePixResponse(gateway, data = {}) {
   const paymentQrUrl = /^https?:\/\//i.test(qrRaw) || qrRaw.startsWith('data:image') ? qrRaw : pickText(pix.qrcodeUrl, pix.qrCodeUrl, source.paymentQrUrl);
   const paymentCodeBase64 = paymentQrUrl ? '' : qrRaw;
   const statusRaw = pickGatewayPaymentStatus(root, nested, transaction, payment, pix) || 'waiting_payment';
+  const externalId = pickText(source.external_id, source.externalId, source.reference, source.ref, transaction.external_id, transaction.externalId);
   if (!txid) return { ok: false, error: `${gateway}_missing_txid`, detail: data };
-  if (!paymentCode && !paymentCodeBase64 && !paymentQrUrl) return { ok: false, error: `${gateway}_missing_pix_visual`, detail: data };
+  if (!paymentCode && !paymentCodeBase64 && !paymentQrUrl) {
+    return {
+      ok: false,
+      error: `${gateway}_missing_pix_visual`,
+      txid,
+      externalId,
+      status: mapPaymentStatus(statusRaw),
+      statusRaw,
+      raw: data,
+      detail: data
+    };
+  }
   return {
     ok: true,
     txid,
-    externalId: pickText(source.external_id, source.externalId, source.reference, source.ref, transaction.external_id, transaction.externalId),
+    externalId,
     status: mapPaymentStatus(statusRaw),
     statusRaw,
     paymentCode,
@@ -1363,12 +1484,12 @@ async function callGatewayStatus(gateway, config = {}, tx = {}) {
   if (gateway === 'atomopay') {
     const url = new URL(`${baseUrl(config.baseUrl, 'https://api.atomopay.com.br/api/public/v1')}/transactions/${encodeURIComponent(txid)}`);
     url.searchParams.set('api_token', config.apiToken);
-    const { response, data } = await fetchJson(url.toString(), { method: 'GET' }, config.timeoutMs);
+    const { response, data } = await fetchJsonWithRetry(url.toString(), { method: 'GET' }, config.timeoutMs);
     if (!response.ok || data?.success === false) return { ok: false, error: 'atomopay_status_failed', detail: data };
     return normalizeStatusResponse(gateway, data);
   }
   if (gateway === 'sunize') {
-    const { response, data } = await fetchJson(`${baseUrl(config.baseUrl, 'https://api.sunize.com.br/v1')}/transactions/${encodeURIComponent(txid)}`, {
+    const { response, data } = await fetchJsonWithRetry(`${baseUrl(config.baseUrl, 'https://api.sunize.com.br/v1')}/transactions/${encodeURIComponent(txid)}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -1383,10 +1504,23 @@ async function callGatewayStatus(gateway, config = {}, tx = {}) {
     const url = new URL(`${baseUrl(config.baseUrl, 'https://multi.paradisepags.com')}/api/v1/query.php`);
     url.searchParams.set('action', 'get_transaction');
     url.searchParams.set('id', txid);
-    const { response, data } = await fetchJson(url.toString(), {
+    let { response, data } = await fetchJsonWithRetry(url.toString(), {
       method: 'GET',
       headers: { 'X-API-Key': config.apiKey }
     }, config.timeoutMs);
+    if ((!response.ok || data?.success === false || String(data?.status || '').toLowerCase() === 'error') && tx.externalId) {
+      const byReferenceUrl = new URL(`${baseUrl(config.baseUrl, 'https://multi.paradisepags.com')}/api/v1/query.php`);
+      byReferenceUrl.searchParams.set('action', 'list_transactions');
+      byReferenceUrl.searchParams.set('external_id', tx.externalId);
+      const byReference = await fetchJsonWithRetry(byReferenceUrl.toString(), {
+        method: 'GET',
+        headers: { 'X-API-Key': config.apiKey }
+      }, config.timeoutMs).catch(() => null);
+      if (byReference?.response?.ok && byReference.data?.success !== false) {
+        response = byReference.response;
+        data = byReference.data;
+      }
+    }
     if (!response.ok || data?.success === false || String(data?.status || '').toLowerCase() === 'error') {
       return { ok: false, error: 'paradise_status_failed', detail: data };
     }
