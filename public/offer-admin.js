@@ -235,20 +235,39 @@ function renderGateways() {
   const payments = settings().payments || {};
   const order = (payments.gatewayOrder || gateways).filter((gateway) => gateways.includes(gateway));
   const transactionsByGateway = countGatewayTransactions();
+  const readyCount = gateways.filter((gateway) => gatewayCredentialInfo(gateway).ready).length;
+  const activeGateway = order.find((gateway) => gatewayCredentialInfo(gateway).ready) || order[0] || 'atomopay';
   $('#tab-gateways').innerHTML = `
     <section class="admin-section admin-section--overview">
-      <div class="admin-section-header"><h2>Saude de conversao</h2><span class="admin-chip">PIX</span></div>
+      <div class="admin-section-header"><h2>Saude de conversao</h2><span class="admin-chip">${readyCount}/${gateways.length} prontos</span></div>
+      <div class="admin-hero">
+        <div class="admin-hero-info">
+          <h3>Roteamento PIX da oferta</h3>
+          <p>O LEOHUB tenta o primeiro gateway pronto da lista. Se ele falhar, cai automaticamente para o proximo da prioridade.</p>
+          <div class="admin-hero-tags">
+            <span class="admin-tag">Primeira tentativa: <strong>${escapeHtml(gatewayNames[activeGateway] || activeGateway)}</strong></span>
+            <span class="admin-tag">Modo: <strong>${gatewayCredentialInfo(activeGateway).mockMode ? 'Mock' : 'Real'}</strong></span>
+            <span class="admin-tag">Fallback: <strong>${escapeHtml(order.map((gateway) => gatewayNames[gateway]).join(' -> '))}</strong></span>
+          </div>
+        </div>
+        <div class="admin-hero-highlight">
+          <span>Receita PIX</span>
+          <strong>${money(state.transactions.filter((tx) => tx.status === 'paid').reduce((sum, tx) => sum + Number(tx.amount || 0), 0))}</strong>
+          <em>${state.transactions.filter((tx) => tx.status === 'paid').length} pagamentos pagos</em>
+        </div>
+      </div>
       <div class="admin-kpi-grid">
         ${gateways.map((gateway) => {
           const item = transactionsByGateway[gateway] || { pix: 0, paid: 0, revenue: 0 };
           const conv = item.pix ? Math.round((item.paid / item.pix) * 1000) / 10 : 0;
-          return kpi(gatewayNames[gateway], `${conv}%`, `${item.paid} pagos / ${item.pix} PIX`);
+          const info = gatewayCredentialInfo(gateway);
+          return kpi(gatewayNames[gateway], `${conv}%`, `${item.paid} pagos / ${item.pix} PIX | ${info.label}`);
         }).join('')}
       </div>
     </section>
     <section class="admin-section admin-section--card gateway-config-section">
       <div class="admin-section-header"><h2>Configuracao dos gateways</h2><span class="admin-chip">Fallback real</span></div>
-      <p class="admin-hint">A primeira opcao habilitada e com credenciais gera o PIX. Se falhar, o LEOHUB tenta a proxima.</p>
+      <p class="admin-hint">Configure igual ao painel antigo: liga/desliga gateway, coloca credenciais, ordena prioridade e testa cada provedor sem deploy.</p>
       <div class="gateway-top-row">
         <input type="hidden" id="payments-active-gateway" value="${escapeHtml(payments.activeGateway || order[0] || 'atomopay')}">
         <div class="gateway-priority-panel">
@@ -257,15 +276,30 @@ function renderGateways() {
             ${order.map((gateway, index) => gatewayOrderItem(gateway, index)).join('')}
           </div>
         </div>
+        <p class="gateway-top-row-note">A ordem salva aqui e a ordem real usada pela API publica. Teste de gateway e isolado: se voce testar Paradise, ele nao cai para AtomoPay escondido.</p>
       </div>
+      <div class="gateway-test-panel">
+        <div>
+          <strong>Teste operacional de PIX</strong>
+          <span>Gera PIX real ou mock conforme a configuracao de cada gateway selecionado.</span>
+        </div>
+        <div class="gateway-test-controls">
+          <div class="input-group gateway-test-amount">
+            <input id="gateway-test-amount" type="number" min="1" step="0.01" class="floating-input" placeholder=" " value="1.99">
+            <label for="gateway-test-amount" class="floating-label">Valor teste</label>
+          </div>
+          <div class="gateway-test-checks">
+            ${gateways.map((gateway) => `<label><input type="checkbox" data-gateway-test="${gateway}" checked> ${gatewayNames[gateway]}</label>`).join('')}
+          </div>
+          <button id="test-gateway-pix" class="btn-secondary" type="button">Gerar PIX de teste</button>
+        </div>
+        <span id="gateway-test-status" class="admin-muted"></span>
+      </div>
+      <div id="gateway-test-cards" class="gateway-test-results hidden"></div>
+      <pre id="gateway-test-result" class="leohub-code gateway-test-result hidden"></pre>
       <div class="gateway-card-list gateway-card-list--compact">
         ${gateways.map((gateway) => gatewayConfigCard(gateway)).join('')}
       </div>
-      <div class="admin-form-actions">
-        <button id="test-gateway-pix" class="btn-secondary" type="button">Gerar PIX de teste</button>
-        <span id="gateway-test-status" class="admin-muted"></span>
-      </div>
-      <pre id="gateway-test-result" class="leohub-code gateway-test-result hidden"></pre>
     </section>
   `;
 }
@@ -287,12 +321,20 @@ function countGatewayTransactions() {
 
 function gatewayOrderItem(gateway, index) {
   const cfg = settings().payments?.gateways?.[gateway] || {};
+  const stats = countGatewayTransactions()[gateway] || { pix: 0, paid: 0, revenue: 0 };
+  const conv = stats.pix ? Math.round((stats.paid / stats.pix) * 1000) / 10 : 0;
+  const info = gatewayCredentialInfo(gateway);
   return `
     <article class="gateway-order-item${cfg.enabled === false ? ' is-disabled' : ''}" data-gateway-order-item="${gateway}">
       <span class="gateway-order-index">${index + 1}</span>
       <span class="gateway-order-handle"></span>
       <span class="gateway-order-name">${gatewayNames[gateway]}</span>
-      <span class="gateway-order-state">${cfg.enabled === false ? 'Desligado' : cfg.mockMode ? 'Mock' : 'Real'}</span>
+      <span class="gateway-order-stats">
+        <span class="gateway-order-stat"><strong>${stats.pix}</strong><em>Gerados</em></span>
+        <span class="gateway-order-stat"><strong>${stats.paid}</strong><em>Aprovados</em></span>
+        <span class="gateway-order-stat gateway-order-stat--conversion"><strong>${conv}%</strong><em>Conversao</em><i><b style="width:${Math.min(100, conv)}%"></b></i></span>
+      </span>
+      <span class="gateway-order-state${info.ready ? ' is-on' : ''}">${escapeHtml(info.label)}</span>
       <button class="gateway-order-move" type="button" data-gateway-order-move="up" aria-label="Subir"></button>
       <button class="gateway-order-move" type="button" data-gateway-order-move="down" aria-label="Descer"></button>
     </article>
@@ -301,12 +343,18 @@ function gatewayOrderItem(gateway, index) {
 
 function gatewayConfigCard(gateway) {
   const cfg = settings().payments?.gateways?.[gateway] || {};
+  const info = gatewayCredentialInfo(gateway);
+  const webhookUrl = `${location.origin}/api/v1/webhooks/${gateway}?offer_id=${encodeURIComponent(state.offer.id)}&token=${encodeURIComponent(cfg.webhookToken || 'TOKEN_DO_WEBHOOK')}`;
   return `
-    <article class="gateway-card is-open" data-gateway-card="${gateway}">
+    <article class="gateway-card is-open${info.ready ? ' is-current' : ''}" data-gateway-card="${gateway}">
       <header class="gateway-card-header">
         <div class="gateway-card-heading">
           <h3>${gatewayNames[gateway]}</h3>
           <p>${gatewayDescription(gateway)}</p>
+          <div class="gateway-required-line ${info.ready ? 'is-ok' : 'is-warn'}">
+            <strong>${escapeHtml(info.label)}</strong>
+            <span>${escapeHtml(info.help)}</span>
+          </div>
         </div>
         <div class="gateway-card-actions">
           <label class="gateway-switch">
@@ -327,6 +375,11 @@ function gatewayConfigCard(gateway) {
           ${input(`payments.gateways.${gateway}.timeoutMs`, 'Timeout MS', cfg.timeoutMs || 12000)}
           ${input(`payments.gateways.${gateway}.webhookToken`, 'Webhook Token', cfg.webhookToken, 'password')}
           ${gatewayFields(gateway, cfg)}
+          <div class="gateway-webhook-box input-group--wide">
+            <span>Webhook para configurar no gateway</span>
+            <code>${escapeHtml(webhookUrl)}</code>
+            <button class="btn-secondary" type="button" data-copy="${escapeHtml(webhookUrl)}">Copiar webhook</button>
+          </div>
         </div>
       </div>
     </article>
@@ -334,8 +387,8 @@ function gatewayConfigCard(gateway) {
 }
 
 function gatewayDescription(gateway) {
-  if (gateway === 'atomopay') return 'Usa api_token, offer_hash e product_hash para gerar PIX.';
-  if (gateway === 'paradise') return 'Usa X-API-Key, productHash opcional e query de status.';
+  if (gateway === 'atomopay') return 'Usa api_token na query, offer_hash, product_hash, postback e consulta por hash.';
+  if (gateway === 'paradise') return 'Usa X-API-Key, reference da sessao, productHash/source e query de status.';
   return 'Usa x-api-key e x-api-secret, com telefone em formato +55.';
 }
 
@@ -344,7 +397,8 @@ function gatewayFields(gateway, cfg) {
     return [
       input(`payments.gateways.${gateway}.apiToken`, 'API Token', cfg.apiToken, 'password'),
       input(`payments.gateways.${gateway}.offerHash`, 'Offer Hash', cfg.offerHash),
-      input(`payments.gateways.${gateway}.productHash`, 'Product Hash', cfg.productHash)
+      input(`payments.gateways.${gateway}.productHash`, 'Product Hash', cfg.productHash),
+      input(`payments.gateways.${gateway}.expireInDays`, 'Expira em dias', cfg.expireInDays || 2)
     ].join('');
   }
   if (gateway === 'paradise') {
@@ -360,6 +414,43 @@ function gatewayFields(gateway, cfg) {
     input(`payments.gateways.${gateway}.apiKey`, 'API Key', cfg.apiKey, 'password'),
     input(`payments.gateways.${gateway}.apiSecret`, 'API Secret', cfg.apiSecret, 'password')
   ].join('');
+}
+
+function gatewayCredentialInfo(gateway) {
+  const cfg = settings().payments?.gateways?.[gateway] || {};
+  if (cfg.enabled === false) {
+    return { ready: false, mockMode: Boolean(cfg.mockMode), label: 'Desligado', help: 'Este gateway nao participa do fallback.' };
+  }
+  if (cfg.mockMode) {
+    return { ready: true, mockMode: true, label: 'Mock ativo', help: 'Gera PIX fake para testar tela e fluxo sem chamar o gateway real.' };
+  }
+  const required = {
+    atomopay: ['apiToken', 'offerHash', 'productHash'],
+    paradise: ['apiKey'],
+    sunize: ['apiKey', 'apiSecret']
+  }[gateway] || [];
+  const labels = {
+    apiToken: 'API Token',
+    offerHash: 'Offer Hash',
+    productHash: 'Product Hash',
+    apiKey: 'API Key',
+    apiSecret: 'API Secret'
+  };
+  const missing = required.filter((field) => !String(cfg[field] || '').trim());
+  if (missing.length) {
+    return {
+      ready: false,
+      mockMode: false,
+      label: `Falta ${missing.length}`,
+      help: `Obrigatorio para modo real: ${missing.map((field) => labels[field] || field).join(', ')}.`
+    };
+  }
+  return {
+    ready: true,
+    mockMode: false,
+    label: 'Real pronto',
+    help: 'Credenciais minimas preenchidas. O teste chama o provedor real.'
+  };
 }
 
 function renderTracking() {
@@ -625,11 +716,19 @@ async function saveSettings() {
 async function testGatewayPix() {
   const status = $('#gateway-test-status');
   const output = $('#gateway-test-result');
+  const cards = $('#gateway-test-cards');
+  const amount = Number($('#gateway-test-amount')?.value || 1.99);
+  const selected = $$('[data-gateway-test]:checked').map((item) => item.dataset.gatewayTest).filter((gateway) => gateways.includes(gateway));
+  if (!selected.length) {
+    status.textContent = 'Selecione pelo menos um gateway';
+    return;
+  }
   status.textContent = 'Gerando PIX de teste...';
   output.classList.add('hidden');
+  cards?.classList.add('hidden');
   const body = {
-    amount: 1.99,
-    gateways,
+    amount,
+    gateways: selected,
     customer: { name: 'Teste LEOHUB', email: 'teste@leohub.local', document: '12345678909', phone: '11999999999' },
     utm: { utm_source: 'admin_test' }
   };
@@ -638,9 +737,44 @@ async function testGatewayPix() {
     body: JSON.stringify(body)
   });
   status.textContent = data.ok ? 'Teste executado' : 'Todos os gateways falharam';
+  if (cards) {
+    cards.innerHTML = gatewayTestCards(data.results || []);
+    cards.classList.remove('hidden');
+  }
   output.textContent = JSON.stringify(data, null, 2);
   output.classList.remove('hidden');
   await loadCollections();
+}
+
+function gatewayTestCards(results) {
+  return results.map((item) => {
+    const tx = item.transaction || {};
+    const ok = Boolean(item.ok);
+    const reason = item.error || item.reason || item.attempts?.map((attempt) => `${attempt.gateway}: ${attempt.reason}`).join(' | ') || '';
+    return `
+      <article class="gateway-test-card ${ok ? '' : 'gateway-test-card--error'}">
+        <div class="gateway-test-card__top">
+          <div class="gateway-test-card__title-group">
+            <span class="gateway-test-card__eyebrow">${ok ? 'PIX gerado' : 'Falhou'}</span>
+            <h4>${escapeHtml(gatewayNames[item.gateway] || item.gateway)}</h4>
+            <p class="gateway-test-card__subtitle">${ok ? `Status: ${escapeHtml(tx.status || '-')}` : escapeHtml(reason || 'Gateway nao retornou PIX')}</p>
+          </div>
+          <span class="gateway-order-state${ok ? ' is-on' : ''}">${ok ? 'OK' : 'Erro'}</span>
+        </div>
+        ${ok ? `
+          <div class="gateway-test-card__details">
+            <span><small>TXID</small><code>${escapeHtml(tx.txid || tx.id || '-')}</code></span>
+            <span><small>Valor</small><strong>${money(tx.amount || 0)}</strong></span>
+            <span><small>Gateway</small><strong>${escapeHtml(gatewayNames[tx.gateway] || tx.gateway || item.gateway)}</strong></span>
+          </div>
+          <div class="gateway-test-card__copy">
+            <input readonly value="${escapeHtml(tx.paymentCode || tx.paymentQrUrl || tx.paymentCodeBase64 || '')}">
+            <button class="btn-secondary" type="button" data-copy="${escapeHtml(tx.paymentCode || tx.paymentQrUrl || tx.paymentCodeBase64 || '')}">Copiar PIX</button>
+          </div>
+        ` : `<div class="gateway-test-card__error">${escapeHtml(reason || 'Falha desconhecida')}</div>`}
+      </article>
+    `;
+  }).join('') || '<div class="gateway-test-empty">Nenhum gateway testado.</div>';
 }
 
 async function showLeadDetail(leadId) {

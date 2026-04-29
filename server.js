@@ -922,6 +922,11 @@ function resolveGatewayOrder(offer, requested = '') {
   return [...new Set(withRequested.map((item) => normalizeStatus(item)).filter((item) => GATEWAYS.includes(item)))];
 }
 
+function resolveStrictGatewayOrder(requested = '') {
+  const gateway = normalizeStatus(requested);
+  return GATEWAYS.includes(gateway) ? [gateway] : [];
+}
+
 function gatewayHasCredentials(gateway, config = {}) {
   if (config.mockMode) return true;
   if (gateway === 'sunize') return Boolean(config.apiKey && config.apiSecret);
@@ -930,14 +935,44 @@ function gatewayHasCredentials(gateway, config = {}) {
   return false;
 }
 
+function gatewayCredentialState(gateway, config = {}, offer = null) {
+  const requiredByGateway = {
+    atomopay: ['apiToken', 'offerHash', 'productHash'],
+    paradise: ['apiKey'],
+    sunize: ['apiKey', 'apiSecret']
+  };
+  const recommendedByGateway = {
+    atomopay: ['baseUrl'],
+    paradise: ['productHash'],
+    sunize: ['baseUrl']
+  };
+  const required = requiredByGateway[gateway] || [];
+  const recommended = recommendedByGateway[gateway] || [];
+  const missing = config.mockMode ? [] : required.filter((field) => !toText(config[field], 1000));
+  return {
+    gateway,
+    enabled: config.enabled !== false,
+    mockMode: Boolean(config.mockMode),
+    ready: config.enabled !== false && (config.mockMode || missing.length === 0),
+    required,
+    recommended,
+    missing,
+    mode: config.mockMode ? 'mock' : 'real',
+    webhookUrl: offer ? buildWebhookUrl(offer, gateway, config) : ''
+  };
+}
+
 async function createPixForOffer(offer, body = {}, req = null) {
   if (offer.settings?.features?.pix === false) {
     return { ok: false, status: 403, error: 'pix_disabled' };
   }
-  const order = resolveGatewayOrder(offer, body.gateway || body.paymentGateway);
+  const order = body.strictGateway
+    ? resolveStrictGatewayOrder(body.gateway || body.paymentGateway)
+    : resolveGatewayOrder(offer, body.gateway || body.paymentGateway);
   const attempts = [];
   const amount = toAmount(body.amount || body.value || body.total);
   if (amount <= 0) return { ok: false, status: 400, error: 'invalid_amount' };
+  if (!order.length) return { ok: false, status: 400, error: 'invalid_gateway' };
   const sessionId = pickText(body.sessionId, body.session_id, body.orderId) || id('session');
   const customer = normalizeCustomer(body.customer || body.personal || {});
   const idempotencyKey = pickText(body.idempotencyKey, body.orderId, `${offer.id}:${sessionId}:${amount}`);
@@ -1270,7 +1305,7 @@ function normalizePixResponse(gateway, data = {}) {
   );
   const paymentQrUrl = /^https?:\/\//i.test(qrRaw) || qrRaw.startsWith('data:image') ? qrRaw : pickText(pix.qrcodeUrl, pix.qrCodeUrl, source.paymentQrUrl);
   const paymentCodeBase64 = paymentQrUrl ? '' : qrRaw;
-  const statusRaw = pickText(source.status, source.raw_status, source.rawStatus, transaction.status, payment.status) || 'waiting_payment';
+  const statusRaw = pickGatewayPaymentStatus(root, nested, transaction, payment, pix) || 'waiting_payment';
   if (!txid) return { ok: false, error: `${gateway}_missing_txid`, detail: data };
   if (!paymentCode && !paymentCodeBase64 && !paymentQrUrl) return { ok: false, error: `${gateway}_missing_pix_visual`, detail: data };
   return {
@@ -1284,6 +1319,40 @@ function normalizePixResponse(gateway, data = {}) {
     paymentQrUrl,
     raw: data
   };
+}
+
+function pickGatewayPaymentStatus(root = {}, nested = {}, transaction = {}, payment = {}, pix = {}) {
+  const candidates = [
+    transaction.status,
+    transaction.raw_status,
+    transaction.rawStatus,
+    payment.status,
+    payment.raw_status,
+    payment.rawStatus,
+    pix.status,
+    nested.payment_status,
+    nested.paymentStatus,
+    nested.transaction_status,
+    nested.transactionStatus,
+    nested.raw_status,
+    nested.rawStatus,
+    nested.status,
+    root.payment_status,
+    root.paymentStatus,
+    root.transaction_status,
+    root.transactionStatus,
+    root.raw_status,
+    root.rawStatus,
+    root.status
+  ];
+  for (const candidate of candidates) {
+    const text = toText(candidate, 80);
+    if (!text) continue;
+    const normalized = normalizeStatus(text);
+    if ((normalized === 'success' || normalized === 'ok') && (root.success === true || nested.success === true)) continue;
+    return text;
+  }
+  return '';
 }
 
 function mapPaymentStatus(statusRaw = '') {
@@ -1343,8 +1412,9 @@ function normalizeStatusResponse(gateway, data = {}) {
   const nested = asObject(root.data);
   const transaction = asObject(root.transaction || nested.transaction);
   const payment = asObject(root.payment || nested.payment);
+  const pix = asObject(root.pix || nested.pix || transaction.pix || payment.pix);
   const source = Object.keys(nested).length ? nested : root;
-  const statusRaw = pickText(source.status, source.raw_status, source.rawStatus, transaction.status, payment.status) || 'waiting_payment';
+  const statusRaw = pickGatewayPaymentStatus(root, nested, transaction, payment, pix) || 'waiting_payment';
   const pixNormalized = normalizePixResponse(gateway, data);
   return {
     ok: true,
@@ -2110,6 +2180,7 @@ async function handleApi(req, res, pathname) {
       const result = await createPixForOffer(offer, {
         ...body,
         gateway,
+        strictGateway: true,
         amount: toAmount(body.amount || 1.99),
         sessionId: `admin_test_${gateway}_${Date.now()}`,
         customer: {
@@ -2122,7 +2193,39 @@ async function handleApi(req, res, pathname) {
       }, req).catch((error) => ({ ok: false, error: error?.message || 'gateway_test_error' }));
       results.push({ gateway, ...sanitizeSecrets(result) });
     }
-    sendJson(res, 200, { ok: results.some((item) => item.ok), results });
+    sendJson(res, 200, {
+      ok: results.some((item) => item.ok),
+      amount: toAmount(body.amount || 1.99),
+      checked: selected,
+      results
+    });
+    return;
+  }
+  const gatewayHealthMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/gateway-health$/);
+  if (gatewayHealthMatch && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return;
+    const offer = findOfferById(decodeURIComponent(gatewayHealthMatch[1]));
+    if (!offer) return sendJson(res, 404, { ok: false, error: 'offer_not_found' });
+    const payments = asObject(offer.settings?.payments);
+    const order = resolveGatewayOrder(offer);
+    const stats = {};
+    for (const gateway of GATEWAYS) {
+      const rows = STORE.transactions.filter((tx) => tx.offerId === offer.id && tx.gateway === gateway);
+      const paidRows = rows.filter((tx) => tx.status === 'paid');
+      stats[gateway] = {
+        pix: rows.length,
+        paid: paidRows.length,
+        revenue: paidRows.reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
+      };
+    }
+    sendJson(res, 200, {
+      ok: true,
+      order,
+      gateways: GATEWAYS.map((gateway) => ({
+        ...gatewayCredentialState(gateway, asObject(payments.gateways?.[gateway]), offer),
+        stats: stats[gateway] || { pix: 0, paid: 0, revenue: 0 }
+      }))
+    });
     return;
   }
   const reconcileMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/pix-reconcile$/);
