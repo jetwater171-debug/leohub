@@ -246,7 +246,7 @@ function renderGateways() {
           <p>O LEOHUB tenta o primeiro gateway pronto da lista. Se ele falhar, cai automaticamente para o proximo da prioridade.</p>
           <div class="admin-hero-tags">
             <span class="admin-tag">Primeira tentativa: <strong>${escapeHtml(gatewayNames[activeGateway] || activeGateway)}</strong></span>
-            <span class="admin-tag">Modo: <strong>${gatewayCredentialInfo(activeGateway).mockMode ? 'Mock' : 'Real'}</strong></span>
+            <span class="admin-tag">Modo: <strong>Real</strong></span>
             <span class="admin-tag">Fallback: <strong>${escapeHtml(order.map((gateway) => gatewayNames[gateway]).join(' -> '))}</strong></span>
           </div>
         </div>
@@ -281,7 +281,7 @@ function renderGateways() {
       <div class="gateway-test-panel">
         <div>
           <strong>Teste operacional de PIX</strong>
-          <span>Gera PIX real ou mock conforme a configuracao de cada gateway selecionado.</span>
+          <span>Gera PIX real no provedor selecionado. Se faltar credencial, o teste falha e mostra o motivo.</span>
         </div>
         <div class="gateway-test-controls">
           <div class="input-group gateway-test-amount">
@@ -325,7 +325,7 @@ function gatewayOrderItem(gateway, index) {
   const conv = stats.pix ? Math.round((stats.paid / stats.pix) * 1000) / 10 : 0;
   const info = gatewayCredentialInfo(gateway);
   return `
-    <article class="gateway-order-item${cfg.enabled === false ? ' is-disabled' : ''}" data-gateway-order-item="${gateway}">
+    <article class="gateway-order-item${cfg.enabled === false ? ' is-disabled' : ''}" data-gateway-order-item="${gateway}" draggable="true">
       <span class="gateway-order-index">${index + 1}</span>
       <span class="gateway-order-handle"></span>
       <span class="gateway-order-name">${gatewayNames[gateway]}</span>
@@ -362,17 +362,11 @@ function gatewayConfigCard(gateway) {
             <span class="gateway-switch-track"></span>
             <span class="gateway-switch-text">${cfg.enabled ? 'Ativo' : 'Desligado'}</span>
           </label>
-          <label class="gateway-switch">
-            <input type="checkbox" data-field="payments.gateways.${gateway}.mockMode" ${checked(cfg.mockMode)}>
-            <span class="gateway-switch-track"></span>
-            <span class="gateway-switch-text">Mock</span>
-          </label>
         </div>
       </header>
       <div class="gateway-card-body">
         <div class="admin-grid gateway-fields-grid">
-          ${input(`payments.gateways.${gateway}.baseUrl`, 'Base URL', cfg.baseUrl)}
-          ${input(`payments.gateways.${gateway}.timeoutMs`, 'Timeout MS', cfg.timeoutMs || 12000)}
+          ${input(`payments.gateways.${gateway}.baseUrl`, 'Base URL do gateway', cfg.baseUrl || gatewayDefaultBaseUrl(gateway))}
           ${input(`payments.gateways.${gateway}.webhookToken`, 'Webhook Token', cfg.webhookToken, 'password')}
           ${gatewayFields(gateway, cfg)}
           <div class="gateway-webhook-box input-group--wide">
@@ -390,6 +384,13 @@ function gatewayDescription(gateway) {
   if (gateway === 'atomopay') return 'Usa api_token na query, offer_hash, product_hash, postback e consulta por hash.';
   if (gateway === 'paradise') return 'Usa X-API-Key, reference da sessao, productHash/source e query de status.';
   return 'Usa x-api-key e x-api-secret, com telefone em formato +55.';
+}
+
+function gatewayDefaultBaseUrl(gateway) {
+  if (gateway === 'atomopay') return 'https://api.atomopay.com.br/api/public/v1';
+  if (gateway === 'paradise') return 'https://multi.paradisepags.com';
+  if (gateway === 'sunize') return 'https://api.sunize.com.br/v1';
+  return '';
 }
 
 function gatewayFields(gateway, cfg) {
@@ -419,10 +420,7 @@ function gatewayFields(gateway, cfg) {
 function gatewayCredentialInfo(gateway) {
   const cfg = settings().payments?.gateways?.[gateway] || {};
   if (cfg.enabled === false) {
-    return { ready: false, mockMode: Boolean(cfg.mockMode), label: 'Desligado', help: 'Este gateway nao participa do fallback.' };
-  }
-  if (cfg.mockMode) {
-    return { ready: true, mockMode: true, label: 'Mock ativo', help: 'Gera PIX fake para testar tela e fluxo sem chamar o gateway real.' };
+    return { ready: false, label: 'Desligado', help: 'Este gateway nao participa do fallback.' };
   }
   const required = {
     atomopay: ['apiToken', 'offerHash', 'productHash'],
@@ -440,14 +438,12 @@ function gatewayCredentialInfo(gateway) {
   if (missing.length) {
     return {
       ready: false,
-      mockMode: false,
       label: `Falta ${missing.length}`,
       help: `Obrigatorio para modo real: ${missing.map((field) => labels[field] || field).join(', ')}.`
     };
   }
   return {
     ready: true,
-    mockMode: false,
     label: 'Real pronto',
     help: 'Credenciais minimas preenchidas. O teste chama o provedor real.'
   };
@@ -673,6 +669,9 @@ function toggle(field, label, value) {
 
 function collectSettings() {
   const next = JSON.parse(JSON.stringify(settings()));
+  gateways.forEach((gateway) => {
+    if (next.payments?.gateways?.[gateway]) delete next.payments.gateways[gateway].mockMode;
+  });
   $$('[data-field]').forEach((field) => {
     const path = field.dataset.field;
     let value = field.type === 'checkbox' ? field.checked : field.value;
@@ -689,6 +688,28 @@ function collectSettings() {
     setDeep(next, 'payments.activeGateway', order[0] || 'atomopay');
   }
   return next;
+}
+
+function refreshGatewayOrderIndexes() {
+  $$('#payments-gateway-order [data-gateway-order-item]').forEach((node, index) => {
+    const number = node.querySelector('.gateway-order-index');
+    if (number) number.textContent = String(index + 1);
+  });
+  const order = $$('#payments-gateway-order [data-gateway-order-item]').map((item) => item.dataset.gatewayOrderItem);
+  const current = $('.gateway-priority-panel__head span');
+  if (current) current.textContent = order.join(' -> ');
+  const active = $('#payments-active-gateway');
+  if (active) active.value = order[0] || 'atomopay';
+}
+
+function getDragAfterElement(container, y) {
+  const elements = [...container.querySelectorAll('[data-gateway-order-item]:not(.is-dragging)')];
+  return elements.reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closest.offset) return { offset, element: child };
+    return closest;
+  }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
 }
 
 function setDeep(target, path, value) {
@@ -826,7 +847,7 @@ document.addEventListener('click', async (event) => {
     if (list && item && sibling) {
       if (move.dataset.gatewayOrderMove === 'up') list.insertBefore(item, sibling);
       else list.insertBefore(sibling, item);
-      $$('#payments-gateway-order .gateway-order-index').forEach((node, index) => node.textContent = String(index + 1));
+      refreshGatewayOrderIndexes();
     }
   }
 
@@ -835,6 +856,32 @@ document.addEventListener('click', async (event) => {
 
   const lead = event.target.closest('[data-lead-id]');
   if (lead) showLeadDetail(lead.dataset.leadId);
+});
+
+document.addEventListener('dragstart', (event) => {
+  const item = event.target.closest?.('[data-gateway-order-item]');
+  if (!item) return;
+  item.classList.add('is-dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', item.dataset.gatewayOrderItem || '');
+});
+
+document.addEventListener('dragend', (event) => {
+  const item = event.target.closest?.('[data-gateway-order-item]');
+  if (!item) return;
+  item.classList.remove('is-dragging');
+  refreshGatewayOrderIndexes();
+});
+
+document.addEventListener('dragover', (event) => {
+  const list = event.target.closest?.('#payments-gateway-order');
+  if (!list) return;
+  event.preventDefault();
+  const dragging = list.querySelector('.is-dragging');
+  if (!dragging) return;
+  const afterElement = getDragAfterElement(list, event.clientY);
+  if (afterElement) list.insertBefore(dragging, afterElement);
+  else list.appendChild(dragging);
 });
 
 document.addEventListener('input', (event) => {

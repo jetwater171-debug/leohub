@@ -85,7 +85,6 @@ function defaultGatewayConfig() {
   return {
     enabled: false,
     timeoutMs: 12000,
-    mockMode: true,
     baseUrl: '',
     postbackUrl: '',
     apiKey: '',
@@ -108,6 +107,13 @@ function defaultGatewayConfig() {
     webhookToken: randomToken('lh_wh'),
     webhookTokenRequired: true
   };
+}
+
+function gatewayDefaultBaseUrl(gateway) {
+  if (gateway === 'atomopay') return 'https://api.atomopay.com.br/api/public/v1';
+  if (gateway === 'sunize') return 'https://api.sunize.com.br/v1';
+  if (gateway === 'paradise') return 'https://multi.paradisepags.com';
+  return '';
 }
 
 function defaultOfferSettings() {
@@ -721,6 +727,10 @@ function normalizeOfferInput(input = {}, existing = null) {
       ...asObject(existing?.settings?.payments?.gateways?.[gateway]),
       ...asObject(input.settings?.payments?.gateways?.[gateway])
     };
+    delete settings.payments.gateways[gateway].mockMode;
+    if (!settings.payments.gateways[gateway].baseUrl) {
+      settings.payments.gateways[gateway].baseUrl = gatewayDefaultBaseUrl(gateway);
+    }
   }
   settings.meta = {
     ...defaultOfferSettings().meta,
@@ -928,7 +938,6 @@ function resolveStrictGatewayOrder(requested = '') {
 }
 
 function gatewayHasCredentials(gateway, config = {}) {
-  if (config.mockMode) return true;
   if (gateway === 'sunize') return Boolean(config.apiKey && config.apiSecret);
   if (gateway === 'paradise') return Boolean(config.apiKey);
   if (gateway === 'atomopay') return Boolean(config.apiToken && config.offerHash && config.productHash);
@@ -948,16 +957,15 @@ function gatewayCredentialState(gateway, config = {}, offer = null) {
   };
   const required = requiredByGateway[gateway] || [];
   const recommended = recommendedByGateway[gateway] || [];
-  const missing = config.mockMode ? [] : required.filter((field) => !toText(config[field], 1000));
+  const missing = required.filter((field) => !toText(config[field], 1000));
   return {
     gateway,
     enabled: config.enabled !== false,
-    mockMode: Boolean(config.mockMode),
-    ready: config.enabled !== false && (config.mockMode || missing.length === 0),
+    ready: config.enabled !== false && missing.length === 0,
     required,
     recommended,
     missing,
-    mode: config.mockMode ? 'mock' : 'real',
+    mode: 'real',
     webhookUrl: offer ? buildWebhookUrl(offer, gateway, config) : ''
   };
 }
@@ -1103,26 +1111,7 @@ function buildGatewayItems(config = {}, payload = {}) {
   }));
 }
 
-function mockPixPayload(gateway, payload = {}) {
-  const txid = `${gateway}_${crypto.randomBytes(10).toString('hex')}`;
-  return {
-    ok: true,
-    txid,
-    externalId: payload.sessionId || txid,
-    status: 'waiting_payment',
-    statusRaw: 'mock_waiting_payment',
-    paymentCode: `00020126580014br.gov.bcb.pix0136${crypto.randomUUID()}520400005303986540${toAmount(payload.amount).toFixed(2)}5802BR5925LEOHUB MOCK6009SAO PAULO62070503***6304ABCD`,
-    paymentCodeBase64: '',
-    paymentQrUrl: '',
-    raw: {
-      mock: true,
-      gateway
-    }
-  };
-}
-
 async function callGatewayCreate(gateway, config = {}, payload = {}) {
-  if (config.mockMode) return mockPixPayload(gateway, payload);
   if (gateway === 'atomopay') return createAtomopay(config, payload);
   if (gateway === 'sunize') return createSunize(config, payload);
   if (gateway === 'paradise') return createParadise(config, payload);
@@ -1371,7 +1360,6 @@ function isTerminalPaymentStatus(status = '') {
 async function callGatewayStatus(gateway, config = {}, tx = {}) {
   const txid = pickText(tx.txid, tx.externalId);
   if (!txid) return { ok: false, error: 'missing_txid' };
-  if (config.mockMode) return { ok: true, status: tx.status, statusRaw: tx.statusRaw, raw: { mock: true } };
   if (gateway === 'atomopay') {
     const url = new URL(`${baseUrl(config.baseUrl, 'https://api.atomopay.com.br/api/public/v1')}/transactions/${encodeURIComponent(txid)}`);
     url.searchParams.set('api_token', config.apiToken);
@@ -2526,9 +2514,9 @@ function ensureSeedOffer() {
         activeGateway: 'atomopay',
         gatewayOrder: ['atomopay', 'paradise', 'sunize'],
         gateways: {
-          atomopay: { ...defaultGatewayConfig(), enabled: true, mockMode: true },
-          paradise: { ...defaultGatewayConfig(), enabled: true, mockMode: true },
-          sunize: { ...defaultGatewayConfig(), enabled: true, mockMode: true }
+          atomopay: { ...defaultGatewayConfig(), enabled: true, baseUrl: gatewayDefaultBaseUrl('atomopay') },
+          paradise: { ...defaultGatewayConfig(), enabled: true, baseUrl: gatewayDefaultBaseUrl('paradise') },
+          sunize: { ...defaultGatewayConfig(), enabled: true, baseUrl: gatewayDefaultBaseUrl('sunize') }
         }
       }
     }
