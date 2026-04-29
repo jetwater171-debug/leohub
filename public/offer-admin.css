@@ -53,6 +53,12 @@ body {
   gap: 18px;
 }
 
+body[data-admin='api'] .admin-topbar,
+body[data-admin='gateways'] .admin-topbar,
+body[data-admin='tracking'] .admin-topbar {
+  border-color: rgba(0, 183, 255, .28);
+}
+
 .admin-form-actions {
   display: flex;
   flex-wrap: wrap;

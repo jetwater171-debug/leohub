@@ -20,6 +20,7 @@ const tabs = {
   utmify: ['UTMfy', 'Envio de pedidos e eventos de venda para UTMfy.'],
   gateways: ['Gateways PIX', 'Central de roteamento, credenciais, fallback e testes de PIX.'],
   pages: ['Paginas', 'URLs oficiais usadas pela oferta e documentacao de integracao.'],
+  api: ['API da oferta', 'Credencial, endpoints e codigo pronto para integrar qualquer front.'],
   public: ['Publico', 'Leitura de origem, etapa, cidade, dispositivo e melhores segmentos.'],
   sales: ['Vendas', 'Receita, pagamentos, conversao por gateway e fila externa.'],
   backredirects: ['Backredirects', 'URLs e comportamento quando o lead tenta voltar.'],
@@ -161,6 +162,7 @@ function render() {
     utmify: renderUtmify,
     gateways: renderGateways,
     pages: renderPages,
+    api: renderApi,
     public: renderPublic,
     sales: renderSales,
     backredirects: renderBackredirects,
@@ -364,6 +366,8 @@ function gatewayFields(gateway, cfg) {
 
 function renderTracking() {
   const cfg = settings().tracking || {};
+  const meta = settings().meta || {};
+  const tiktok = settings().tiktok || {};
   $('#tab-tracking').innerHTML = `
     <section class="admin-section admin-section--card">
       <div class="admin-section-header"><h2>Tracking nativo</h2><span class="admin-chip">LEOHUB API</span></div>
@@ -373,6 +377,12 @@ function renderTracking() {
         ${toggle('tracking.captureFbclid', 'Capturar fbclid', cfg.captureFbclid !== false)}
         ${toggle('tracking.captureTtclid', 'Capturar ttclid', cfg.captureTtclid !== false)}
         ${toggle('tracking.captureGclid', 'Capturar gclid', cfg.captureGclid !== false)}
+        ${toggle('meta.enabled', 'Meta CAPI ativo', meta.enabled)}
+        ${input('meta.pixelId', 'Meta Pixel ID', meta.pixelId)}
+        ${input('meta.accessToken', 'Meta Access Token', meta.accessToken, 'password')}
+        ${input('meta.testEventCode', 'Meta Test Event Code', meta.testEventCode)}
+        ${toggle('tiktok.enabled', 'TikTok Pixel ativo', tiktok.enabled)}
+        ${input('tiktok.pixelId', 'TikTok Pixel ID', tiktok.pixelId)}
       </div>
       <pre class="leohub-code">${escapeHtml(integrationSnippet())}</pre>
     </section>
@@ -427,6 +437,60 @@ function renderPages() {
       </div>
     </section>
   `;
+}
+
+function renderApi() {
+  const base = location.origin;
+  const key = state.offer.publicKey || 'SUA_CREDENCIAL';
+  $('#tab-api').innerHTML = `
+    <section class="admin-section admin-section--overview">
+      <div class="admin-section-header"><h2>Integracao rapida</h2><span class="admin-chip">Plug and play</span></div>
+      <div class="admin-hero">
+        <div class="admin-hero-info">
+          <h3>Use esta credencial em qualquer oferta</h3>
+          <p>O front chama a LEOHUB com a credencial da oferta. A LEOHUB decide gateway, fallback, tracking, UTMfy, Pushcut e eventos.</p>
+          <div class="admin-hero-tags">
+            <span class="admin-tag">Config: <strong>/api/site/config</strong></span>
+            <span class="admin-tag">Track: <strong>/api/lead/track</strong></span>
+            <span class="admin-tag">PIX: <strong>/api/pix/create</strong></span>
+          </div>
+        </div>
+        <div class="admin-hero-highlight">
+          <span>Credencial</span>
+          <strong>${escapeHtml(key.slice(0, 10))}...</strong>
+          <em>por oferta</em>
+        </div>
+      </div>
+      <div class="offer-key-box">
+        <code>${escapeHtml(key)}</code>
+        <button class="btn-secondary" type="button" data-copy="${escapeHtml(key)}">Copiar credencial</button>
+      </div>
+    </section>
+    <section class="admin-section admin-section--card">
+      <div class="admin-section-header"><h2>Codigo pronto</h2><button class="btn-secondary" type="button" data-copy-code="api">Copiar codigo</button></div>
+      <pre id="api-code" class="leohub-code">${escapeHtml(integrationSnippet())}</pre>
+    </section>
+    <section class="admin-section admin-section--card">
+      <div class="admin-section-header"><h2>Endpoints ativos</h2><span class="admin-chip">compativel ifood</span></div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>Funcao</th><th>Endpoint</th><th>Metodo</th><th>Uso</th></tr></thead>
+          <tbody>
+            ${endpointRow('Config publica', `${base}/api/site/config`, 'GET', 'Buscar paginas, pixels publicos e backredirects')}
+            ${endpointRow('Track evento', `${base}/api/lead/track`, 'POST', 'Salvar qualquer evento/etapa do lead')}
+            ${endpointRow('Pageview', `${base}/api/lead/pageview`, 'POST', 'Salvar visita unica por pagina')}
+            ${endpointRow('Criar PIX', `${base}/api/pix/create`, 'POST', 'Gerar PIX com fallback multigateway')}
+            ${endpointRow('Status PIX', `${base}/api/pix/status`, 'POST', 'Consultar gateway e sincronizar status')}
+            ${endpointRow('Webhook', `${base}/api/pix/webhook?gateway=atomopay&offer_id=${state.offer.id}`, 'POST', 'Receber confirmacao do gateway')}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function endpointRow(name, url, method, usage) {
+  return `<tr><td><strong>${escapeHtml(name)}</strong></td><td><code>${escapeHtml(url)}</code></td><td>${escapeHtml(method)}</td><td>${escapeHtml(usage)}</td></tr>`;
 }
 
 function renderBackredirects() {
@@ -673,18 +737,54 @@ function detailFields(rows) {
 function integrationSnippet() {
   return `const LEOHUB_URL = '${location.origin}';
 const OFFER_KEY = '${state.offer?.publicKey || 'SUA_CREDENCIAL'}';
+const sessionId = localStorage.getItem('leohub_session') || crypto.randomUUID();
+localStorage.setItem('leohub_session', sessionId);
 
-await fetch(LEOHUB_URL + '/api/v1/track', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'x-leohub-offer-key': OFFER_KEY },
-  body: JSON.stringify({ sessionId, event: 'checkout_view', stage: 'checkout', utm })
+function utmParams() {
+  const params = new URLSearchParams(location.search);
+  return Object.fromEntries(['src', 'sck', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'fbclid', 'ttclid', 'gclid']
+    .map((key) => [key, params.get(key)])
+    .filter(([, value]) => value));
+}
+
+async function leohub(path, body, method = 'POST') {
+  return fetch(LEOHUB_URL + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'x-leohub-offer-key': OFFER_KEY },
+    body: method === 'GET' ? undefined : JSON.stringify(body)
+  }).then((res) => res.json());
+}
+
+await leohub('/api/lead/pageview', {
+  sessionId,
+  page: location.pathname,
+  sourceUrl: location.href,
+  referrer: document.referrer,
+  utm: utmParams()
 });
 
-const pix = await fetch(LEOHUB_URL + '/api/v1/pix/create', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'x-leohub-offer-key': OFFER_KEY },
-  body: JSON.stringify({ amount: 19.90, sessionId, customer, utm })
-}).then(r => r.json());`;
+await leohub('/api/lead/track', {
+  sessionId,
+  event: 'checkout_view',
+  stage: 'checkout',
+  utm: utmParams()
+});
+
+const pix = await leohub('/api/pix/create', {
+  amount: 19.90,
+  sessionId,
+  customer: {
+    name: 'Nome do cliente',
+    email: 'cliente@email.com',
+    phone: '11999999999',
+    document: '12345678909'
+  },
+  utm: utmParams()
+});
+
+const status = await leohub('/api/pix/status', {
+  idTransaction: pix.idTransaction
+});`;
 }
 
 document.addEventListener('click', async (event) => {
@@ -705,6 +805,8 @@ document.addEventListener('click', async (event) => {
 
   const copy = event.target.closest('[data-copy]');
   if (copy) navigator.clipboard?.writeText(copy.dataset.copy);
+  const copyCode = event.target.closest('[data-copy-code]');
+  if (copyCode) navigator.clipboard?.writeText($('#api-code')?.textContent || integrationSnippet());
 
   const lead = event.target.closest('[data-lead-id]');
   if (lead) showLeadDetail(lead.dataset.leadId);

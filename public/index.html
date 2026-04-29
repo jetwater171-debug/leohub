@@ -3,463 +3,98 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LEOHUB</title>
+  <title>LEOHUB - Ofertas</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-mark">LH</span>
-        <div>
-          <strong>LEOHUB</strong>
-          <small>Admin central</small>
-        </div>
-      </div>
-      <nav class="nav">
-        <button class="nav-item is-active" data-view="overview" type="button">Visao geral</button>
-        <button class="nav-item" data-view="users" type="button">Usuarios</button>
-        <button class="nav-item" data-view="offers" type="button">Ofertas</button>
-        <button class="nav-item" data-view="offer" type="button">Admin da oferta</button>
-        <button class="nav-item" data-view="integrations" type="button">Integracoes</button>
-        <button class="nav-item" data-view="docs" type="button">Documentacao</button>
-      </nav>
-      <div class="sidebar-footer">
-        <span id="api-status" class="status-dot"></span>
-        <span id="api-status-text">Conectando</span>
-      </div>
-    </aside>
-
-    <main class="main">
-      <section id="login-screen" class="login-screen">
-        <div class="login-layout">
-          <div class="login-copy">
-            <span class="eyebrow">LEOHUB OS</span>
-            <h1>Controle total das suas ofertas.</h1>
-            <p>Admin master para PIX multigateway, tracking, CAPI, UTMify, Pushcut e funis plugados por credencial.</p>
-            <div class="login-stats">
-              <span>Multi-oferta</span>
-              <span>API-first</span>
-              <span>Supabase ready</span>
-            </div>
+  <main class="hub-only">
+    <section id="login-screen" class="login-screen">
+      <div class="login-layout">
+        <div class="login-copy">
+          <span class="eyebrow">LEOHUB</span>
+          <h1>Suas ofertas em um lugar.</h1>
+          <p>Entre, escolha uma oferta e abra o painel completo dela com gateways, tracking, UTMfy, Pushcut, vendas e leads.</p>
+          <div class="login-stats">
+            <span>PIX multigateway</span>
+            <span>Tracking completo</span>
+            <span>Painel por oferta</span>
           </div>
-          <form id="login-form" class="login-box">
-            <span class="eyebrow">Acesso admin</span>
-            <h2>Entrar na LEOHUB</h2>
-            <label>
-              Senha do admin
-              <input id="admin-password" type="password" autocomplete="current-password" placeholder="Digite sua senha">
-            </label>
-            <button class="primary" type="submit">Entrar no painel</button>
-            <span id="login-error" class="error"></span>
-          </form>
         </div>
-      </section>
+        <form id="login-form" class="login-box">
+          <span class="eyebrow">Acesso admin</span>
+          <h2>Entrar na LEOHUB</h2>
+          <label>
+            Senha do admin
+            <input id="admin-password" type="password" autocomplete="current-password" placeholder="Digite sua senha">
+          </label>
+          <button class="primary" type="submit">Entrar</button>
+          <span id="login-error" class="error"></span>
+        </form>
+      </div>
+    </section>
 
-      <section id="app-screen" class="app-screen hidden">
-        <header class="topbar">
+    <section id="app-screen" class="app-screen hidden">
+      <header class="hub-topbar">
+        <div class="brand">
+          <span class="brand-mark">LH</span>
           <div>
-            <span class="eyebrow">Operacao central</span>
-            <h1 id="view-title">Visao geral</h1>
-          </div>
-          <div class="topbar-actions">
-            <select id="offer-select" aria-label="Oferta ativa"></select>
-            <button id="refresh-btn" class="secondary" type="button">Atualizar</button>
-            <button id="logout-btn" class="ghost" type="button">Sair</button>
-          </div>
-        </header>
-
-        <section id="default-password-alert" class="notice hidden">
-          A senha local ainda esta como <strong>admin</strong>. Antes de publicar, defina <code>LEOHUB_ADMIN_PASSWORD</code>.
-        </section>
-
-        <div id="view-overview" class="view">
-          <div class="metric-grid">
-            <article class="metric"><span>Usuarios</span><strong id="m-users">0</strong></article>
-            <article class="metric"><span>Ofertas</span><strong id="m-offers">0</strong></article>
-            <article class="metric"><span>Leads</span><strong id="m-leads">0</strong></article>
-            <article class="metric"><span>Eventos</span><strong id="m-events">0</strong></article>
-            <article class="metric"><span>PIX gerados</span><strong id="m-transactions">0</strong></article>
-            <article class="metric"><span>Pagos</span><strong id="m-paid">0</strong></article>
-            <article class="metric"><span>Receita</span><strong id="m-revenue">R$ 0,00</strong></article>
-          </div>
-
-          <div class="split">
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Ofertas ativas</h2>
-                <button class="secondary" data-view-jump="offers" type="button">Criar oferta</button>
-              </div>
-              <div id="offers-list" class="offer-list"></div>
-            </section>
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Atividade recente</h2>
-                <span id="recent-count" class="pill">0</span>
-              </div>
-              <div id="recent-feed" class="feed"></div>
-            </section>
+            <strong>LEOHUB</strong>
+            <small id="api-status-text">Conectando</small>
           </div>
         </div>
-
-        <div id="view-users" class="view hidden">
-          <div class="split">
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Criar usuario</h2>
-                <span class="pill">cliente / operador</span>
-              </div>
-              <form id="create-user-form" class="form-grid">
-                <label>
-                  Nome
-                  <input name="name" placeholder="Ex: Cliente Premium" required>
-                </label>
-                <label>
-                  Email
-                  <input name="email" type="email" placeholder="cliente@email.com" required>
-                </label>
-                <label>
-                  Plano
-                  <input name="plan" placeholder="Ex: 2k mensal">
-                </label>
-                <label>
-                  Status
-                  <select name="status">
-                    <option value="active">Ativo</option>
-                    <option value="paused">Pausado</option>
-                    <option value="trial">Teste</option>
-                  </select>
-                </label>
-                <label class="wide">
-                  Observacoes
-                  <textarea name="notes" rows="3" placeholder="Notas internas desse usuario"></textarea>
-                </label>
-                <button class="primary wide" type="submit">Criar usuario</button>
-              </form>
-            </section>
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Usuarios LEOHUB</h2>
-                <span id="users-table-count" class="pill">0</span>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Usuario</th>
-                      <th>Plano</th>
-                      <th>Ofertas</th>
-                      <th>Leads</th>
-                      <th>Receita</th>
-                    </tr>
-                  </thead>
-                  <tbody id="users-table"></tbody>
-                </table>
-              </div>
-            </section>
-          </div>
+        <div class="topbar-actions">
+          <button id="refresh-btn" class="secondary" type="button">Atualizar</button>
+          <button id="logout-btn" class="ghost" type="button">Sair</button>
         </div>
+      </header>
 
-        <div id="view-offers" class="view hidden">
-          <div class="offers-stage">
-            <section class="panel offers-list-panel">
-              <div class="panel-head">
-                <div>
-                  <h2>Ofertas cadastradas</h2>
-                  <p class="muted">Clique em uma oferta para abrir o admin completo dela.</p>
-                </div>
-                <button id="show-create-offer" class="primary" type="button">Criar nova oferta</button>
-              </div>
-              <div id="offers-card-grid" class="offers-card-grid"></div>
-              <div class="table-wrap hidden">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Oferta</th>
-                      <th>Leads</th>
-                      <th>PIX</th>
-                      <th>Pago</th>
-                      <th>Gateway</th>
-                    </tr>
-                  </thead>
-                  <tbody id="offers-table"></tbody>
-                </table>
-              </div>
-              <span id="offers-table-count" class="pill">0</span>
-            </section>
-            <section id="create-offer-panel" class="panel hidden">
-              <div class="panel-head">
-                <h2>Criar oferta</h2>
-                <span class="pill">token automatico</span>
-              </div>
-              <form id="create-offer-form" class="form-grid">
-                <label class="wide">
-                  Usuario dono
-                  <select name="ownerId" id="offer-owner-select"></select>
-                </label>
-                <label>
-                  Nome da oferta
-                  <input name="name" placeholder="Ex: Oferta Bag Premium" required>
-                </label>
-                <label>
-                  Slug
-                  <input name="slug" placeholder="oferta-bag-premium">
-                </label>
-                <label class="wide">
-                  Descricao
-                  <textarea name="description" rows="3" placeholder="Resumo interno da oferta"></textarea>
-                </label>
-                <button class="primary wide" type="submit">Criar oferta</button>
-              </form>
-            </section>
-          </div>
-        </div>
-
-        <div id="view-offer" class="view hidden">
-          <div class="offer-admin-grid">
-            <article class="metric"><span>Leads</span><strong id="offer-m-leads">0</strong></article>
-            <article class="metric"><span>Eventos</span><strong id="offer-m-events">0</strong></article>
-            <article class="metric"><span>PIX</span><strong id="offer-m-pix">0</strong></article>
-            <article class="metric"><span>Pagos</span><strong id="offer-m-paid">0</strong></article>
-            <article class="metric"><span>Conversao</span><strong id="offer-m-conversion">0%</strong></article>
-            <article class="metric"><span>Receita</span><strong id="offer-m-revenue">R$ 0,00</strong></article>
-          </div>
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <h2 id="offer-name">Oferta</h2>
-                <p id="offer-description" class="muted"></p>
-              </div>
-              <div class="inline-actions">
-                <button id="copy-public-key" class="secondary" type="button">Copiar credencial</button>
-                <button id="rotate-key" class="danger" type="button">Rotacionar chave</button>
-              </div>
-            </div>
-            <div class="key-grid">
-              <label>
-                Usuario dono
-                <input id="offer-owner" readonly>
-              </label>
-              <label>
-                Credencial publica
-                <input id="offer-public-key" readonly>
-              </label>
-              <label>
-                ID da oferta
-                <input id="offer-id" readonly>
-              </label>
-              <label>
-                Slug
-                <input id="offer-slug" readonly>
-              </label>
-            </div>
-          </section>
-
-          <div class="tabs">
-            <button class="tab is-active" data-offer-tab="overview" type="button">Resumo</button>
-            <button class="tab" data-offer-tab="leads" type="button">Leads</button>
-            <button class="tab" data-offer-tab="sales" type="button">Vendas</button>
-            <button class="tab" data-offer-tab="events" type="button">Eventos</button>
-            <button class="tab" data-offer-tab="transactions" type="button">PIX</button>
-            <button class="tab" data-offer-tab="gateways" type="button">Gateways</button>
-            <button class="tab" data-offer-tab="tracking" type="button">Tracking</button>
-            <button class="tab" data-offer-tab="utmify" type="button">UTMify</button>
-            <button class="tab" data-offer-tab="pages" type="button">Paginas</button>
-            <button class="tab" data-offer-tab="audience" type="button">Publico</button>
-            <button class="tab" data-offer-tab="backredirects" type="button">Backredirect</button>
-            <button class="tab" data-offer-tab="dispatches" type="button">Fila</button>
-            <button class="tab" data-offer-tab="webhooks" type="button">Webhooks</button>
-          </div>
-
-          <section class="panel">
-            <div class="panel-head">
-              <h2 id="offer-table-title">Leads</h2>
-              <span id="offer-table-count" class="pill">0</span>
-            </div>
-            <div id="offer-module-content">
-              <div class="table-wrap">
-                <table>
-                  <thead id="offer-table-head"></thead>
-                  <tbody id="offer-table-body"></tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <div id="view-integrations" class="view hidden">
-          <form id="settings-form">
-            <div class="split">
-              <section class="panel">
-                <div class="panel-head">
-                  <h2>Gateways PIX</h2>
-                  <button class="primary" type="submit">Salvar configuracoes</button>
-                </div>
-                <div class="form-grid">
-                  <label>
-                    Gateway ativo
-                    <select name="payments.activeGateway">
-                      <option value="atomopay">AtomoPay</option>
-                      <option value="paradise">Paradise</option>
-                      <option value="sunize">Sunize</option>
-                    </select>
-                  </label>
-                  <label>
-                    Ordem de fallback
-                    <input name="payments.gatewayOrderText" placeholder="atomopay,paradise,sunize">
-                  </label>
-                </div>
-                <div id="gateway-configs" class="gateway-list"></div>
-              </section>
-
-              <section class="panel">
-                <div class="panel-head">
-                  <h2>Eventos externos</h2>
-                  <span id="settings-status" class="muted"></span>
-                </div>
-                <div class="form-grid">
-                  <label class="toggle">
-                    <input name="utmify.enabled" type="checkbox">
-                    <span>UTMify ativo</span>
-                  </label>
-                  <label>
-                    Endpoint UTMify
-                    <input name="utmify.endpoint">
-                  </label>
-                  <label>
-                    API Key UTMify
-                    <input name="utmify.apiKey" type="password">
-                  </label>
-                  <label>
-                    Plataforma UTMify
-                    <input name="utmify.platform">
-                  </label>
-                  <label class="toggle">
-                    <input name="pushcut.enabled" type="checkbox">
-                    <span>Pushcut ativo</span>
-                  </label>
-                  <label>
-                    Pushcut PIX gerado
-                    <input name="pushcut.pixCreatedUrl" placeholder="Webhook URL opcional">
-                  </label>
-                  <label>
-                    Pushcut PIX pago
-                    <input name="pushcut.pixConfirmedUrl" placeholder="Webhook URL opcional">
-                  </label>
-                  <label>
-                    Pushcut API Key
-                    <input name="pushcut.apiKey" type="password" placeholder="API-Key da Pushcut">
-                  </label>
-                  <label>
-                    Notification PIX gerado
-                    <input name="pushcut.pixCreatedNotification" placeholder="Nome da notification">
-                  </label>
-                  <label>
-                    Notification PIX pago
-                    <input name="pushcut.pixConfirmedNotification" placeholder="Nome da notification">
-                  </label>
-                  <label class="toggle">
-                    <input name="meta.enabled" type="checkbox">
-                    <span>Meta CAPI ativo</span>
-                  </label>
-                  <label>
-                    Pixel ID
-                    <input name="meta.pixelId">
-                  </label>
-                  <label>
-                    Access Token
-                    <input name="meta.accessToken" type="password">
-                  </label>
-                  <label>
-                    Test Event Code
-                    <input name="meta.testEventCode">
-                  </label>
-                  <label>
-                    Pixel backup
-                    <input name="meta.backupPixelId">
-                  </label>
-                  <label>
-                    Token backup
-                    <input name="meta.backupAccessToken" type="password">
-                  </label>
-                  <label class="toggle">
-                    <input name="tiktok.enabled" type="checkbox">
-                    <span>TikTok Pixel ativo</span>
-                  </label>
-                  <label>
-                    TikTok Pixel ID
-                    <input name="tiktok.pixelId">
-                  </label>
-                  <label>
-                    Home da oferta
-                    <input name="pages.home" placeholder="https://...">
-                  </label>
-                  <label>
-                    Checkout
-                    <input name="pages.checkout" placeholder="https://...">
-                  </label>
-                  <label>
-                    Pagina PIX
-                    <input name="pages.pix" placeholder="https://...">
-                  </label>
-                  <label>
-                    Sucesso
-                    <input name="pages.success" placeholder="https://...">
-                  </label>
-                  <label class="toggle">
-                    <input name="backredirects.enabled" type="checkbox">
-                    <span>Backredirect ativo</span>
-                  </label>
-                  <label class="wide">
-                    URLs de backredirect
-                    <textarea name="backredirects.urlsText" rows="3" placeholder="Uma URL por linha"></textarea>
-                  </label>
-                </div>
-              </section>
-            </div>
-          </form>
-        </div>
-
-        <div id="view-docs" class="view hidden">
-          <div class="split">
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Integracao rapida</h2>
-                <button id="copy-docs" class="secondary" type="button">Copiar exemplo</button>
-              </div>
-              <pre id="docs-code" class="code"></pre>
-            </section>
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Testar API</h2>
-                <span id="tester-status" class="muted"></span>
-              </div>
-              <form id="api-tester" class="form-grid">
-                <label>
-                  Valor
-                  <input name="amount" value="19.90">
-                </label>
-                <label>
-                  Nome
-                  <input name="name" value="Cliente LEOHUB">
-                </label>
-                <label>
-                  Email
-                  <input name="email" value="cliente@leohub.local">
-                </label>
-                <label>
-                  CPF
-                  <input name="document" value="12345678909">
-                </label>
-                <button class="primary wide" type="submit">Gerar PIX de teste</button>
-              </form>
-              <pre id="tester-result" class="code small"></pre>
-            </section>
-          </div>
-        </div>
+      <section id="default-password-alert" class="notice hidden">
+        A senha local ainda esta como <strong>admin</strong>. Antes de publicar, defina <code>LEOHUB_ADMIN_PASSWORD</code>.
       </section>
-    </main>
-  </div>
+
+      <section class="hub-hero panel">
+        <div>
+          <span class="eyebrow">Ofertas</span>
+          <h1>Escolha uma oferta para abrir o admin completo.</h1>
+          <p class="muted">O Hub fica limpo: apenas cadastro de ofertas. Toda configuracao operacional fica dentro do painel da oferta.</p>
+        </div>
+        <button id="show-create-offer" class="primary" type="button">Criar nova oferta</button>
+      </section>
+
+      <section id="create-offer-panel" class="panel hidden">
+        <div class="panel-head">
+          <h2>Criar oferta</h2>
+          <span class="pill">credencial automatica</span>
+        </div>
+        <form id="create-offer-form" class="form-grid">
+          <label>
+            Nome da oferta
+            <input name="name" placeholder="Ex: Oferta Bag Premium" required>
+          </label>
+          <label>
+            Slug
+            <input name="slug" placeholder="oferta-bag-premium">
+          </label>
+          <label class="wide">
+            Descricao
+            <textarea name="description" rows="3" placeholder="Resumo interno da oferta"></textarea>
+          </label>
+          <button class="primary wide" type="submit">Criar oferta e abrir admin</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Ofertas cadastradas</h2>
+            <p class="muted">Clique em qualquer card para entrar no painel administrativo dela.</p>
+          </div>
+          <span id="offers-count" class="pill">0</span>
+        </div>
+        <div id="offers-card-grid" class="offers-card-grid"></div>
+      </section>
+    </section>
+  </main>
 
   <script src="/app.js"></script>
 </body>

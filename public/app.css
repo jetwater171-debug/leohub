@@ -147,6 +147,39 @@ button {
   padding: 28px;
 }
 
+.hub-only {
+  width: min(1280px, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.hub-topbar,
+.hub-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.hub-hero {
+  align-items: flex-end;
+}
+
+.hub-hero h1 {
+  max-width: 820px;
+  margin: 6px 0 10px;
+  font-size: clamp(38px, 6vw, 74px);
+  line-height: .94;
+}
+
+.hub-hero p {
+  max-width: 760px;
+  margin: 0;
+  font-size: 16px;
+}
+
 .login-screen {
   display: grid;
   place-items: center;
