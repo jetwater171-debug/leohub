@@ -1,0 +1,140 @@
+:root {
+  --leohub-blue: #1677ff;
+  --leohub-blue-2: #00b7ff;
+}
+
+body {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(22, 119, 255, .22), transparent 30%),
+    radial-gradient(circle at 86% 18%, rgba(0, 183, 255, .15), transparent 28%),
+    #101113;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.admin-brand--leohub img {
+  display: none;
+}
+
+.admin-brand-mark {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: -.04em;
+  background: linear-gradient(135deg, var(--leohub-blue), var(--leohub-blue-2));
+  box-shadow: 0 18px 38px rgba(22, 119, 255, .28);
+}
+
+.admin-nav-item {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  font-family: inherit;
+}
+
+.admin-nav-item.is-active {
+  background: linear-gradient(135deg, #126dff, #00a9ff);
+  color: #fff;
+}
+
+.admin-sidebar-foot .btn-secondary {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.admin-tab-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-field-help {
+  display: block;
+  margin-top: 6px;
+  color: #8f969f;
+  font-size: .78rem;
+}
+
+.gateway-card-list--compact {
+  display: grid;
+  gap: 16px;
+}
+
+.gateway-order-item.is-disabled {
+  opacity: .48;
+}
+
+.gateway-test-result {
+  margin-top: 14px;
+  white-space: pre-wrap;
+}
+
+.leohub-code {
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, .38);
+  color: #dbeafe;
+  font-size: .86rem;
+}
+
+.leohub-empty {
+  padding: 18px;
+  border: 1px dashed rgba(255, 255, 255, .14);
+  border-radius: 18px;
+  color: #a5abb4;
+}
+
+.admin-table tbody tr {
+  cursor: default;
+}
+
+.admin-table tbody tr[data-lead-id] {
+  cursor: pointer;
+}
+
+.admin-toolbar input,
+.admin-toolbar select {
+  min-height: 44px;
+}
+
+.offer-key-box {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .04);
+}
+
+.offer-key-box code {
+  overflow: hidden;
+  color: #dbeafe;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .offer-key-box {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-topbar-actions {
+    align-items: stretch;
+  }
+}

@@ -1277,8 +1277,7 @@ function bindEvents() {
     if (open) {
       state.activeOfferId = open.dataset.openOffer;
       localStorage.setItem('leohub.active.offer', state.activeOfferId);
-      renderOfferSelect();
-      setView('offer');
+      window.location.href = `/offer-admin.html?id=${encodeURIComponent(state.activeOfferId)}`;
     }
   });
 
