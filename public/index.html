@@ -43,6 +43,8 @@
           </div>
         </div>
         <div class="topbar-actions">
+          <button class="hub-tab is-active" data-hub-tab="offers" type="button">Ofertas</button>
+          <button class="hub-tab" data-hub-tab="api" type="button">API</button>
           <button id="refresh-btn" class="secondary" type="button">Atualizar</button>
           <button id="logout-btn" class="ghost" type="button">Sair</button>
         </div>
@@ -52,47 +54,167 @@
         A senha local ainda esta como <strong>admin</strong>. Antes de publicar, defina <code>LEOHUB_ADMIN_PASSWORD</code>.
       </section>
 
-      <section class="hub-hero panel">
-        <div>
-          <span class="eyebrow">Ofertas</span>
-          <h1>Escolha uma oferta para abrir o admin completo.</h1>
-          <p class="muted">O Hub fica limpo: apenas cadastro de ofertas. Toda configuracao operacional fica dentro do painel da oferta.</p>
-        </div>
-        <button id="show-create-offer" class="primary" type="button">Criar nova oferta</button>
-      </section>
-
-      <section id="create-offer-panel" class="panel hidden">
-        <div class="panel-head">
-          <h2>Criar oferta</h2>
-          <span class="pill">credencial automatica</span>
-        </div>
-        <form id="create-offer-form" class="form-grid">
-          <label>
-            Nome da oferta
-            <input name="name" placeholder="Ex: Oferta Bag Premium" required>
-          </label>
-          <label>
-            Slug
-            <input name="slug" placeholder="oferta-bag-premium">
-          </label>
-          <label class="wide">
-            Descricao
-            <textarea name="description" rows="3" placeholder="Resumo interno da oferta"></textarea>
-          </label>
-          <button class="primary wide" type="submit">Criar oferta e abrir admin</button>
-        </form>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
+      <div id="hub-offers-view" class="hub-view">
+        <section class="hub-hero panel">
           <div>
-            <h2>Ofertas cadastradas</h2>
-            <p class="muted">Clique em qualquer card para entrar no painel administrativo dela.</p>
+            <span class="eyebrow">Ofertas</span>
+            <h1>Escolha uma oferta para abrir o admin completo.</h1>
+            <p class="muted">O Hub fica limpo: apenas cadastro de ofertas. Toda configuracao operacional fica dentro do painel da oferta.</p>
           </div>
-          <span id="offers-count" class="pill">0</span>
-        </div>
-        <div id="offers-card-grid" class="offers-card-grid"></div>
-      </section>
+          <button id="show-create-offer" class="primary" type="button">Criar nova oferta</button>
+        </section>
+
+        <section id="create-offer-panel" class="panel hidden">
+          <div class="panel-head">
+            <h2>Criar oferta</h2>
+            <span class="pill">credencial automatica</span>
+          </div>
+          <form id="create-offer-form" class="form-grid">
+            <label>
+              Nome da oferta
+              <input name="name" placeholder="Ex: Oferta Bag Premium" required>
+            </label>
+            <label>
+              Slug
+              <input name="slug" placeholder="oferta-bag-premium">
+            </label>
+            <label class="wide">
+              Descricao
+              <textarea name="description" rows="3" placeholder="Resumo interno da oferta"></textarea>
+            </label>
+            <button class="primary wide" type="submit">Criar oferta e abrir admin</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Ofertas cadastradas</h2>
+              <p class="muted">Clique em qualquer card para entrar no painel administrativo dela.</p>
+            </div>
+            <span id="offers-count" class="pill">0</span>
+          </div>
+          <div id="offers-card-grid" class="offers-card-grid"></div>
+        </section>
+      </div>
+
+      <div id="hub-api-view" class="hub-view hidden">
+        <section class="hub-hero panel api-hero">
+          <div>
+            <span class="eyebrow">API LEOHUB</span>
+            <h1>Integre qualquer oferta com poucas linhas.</h1>
+            <p class="muted">Escolha a oferta, copie a credencial e cole um dos blocos abaixo no HTML ou JS do funil. A LEOHUB cuida de tracking, PIX multigateway, fallback, webhooks, UTMfy, Pushcut e Meta CAPI.</p>
+          </div>
+          <div class="api-offer-picker">
+            <label>
+              Oferta usada nos exemplos
+              <select id="api-offer-select"></select>
+            </label>
+            <button id="copy-api-key" class="secondary" type="button">Copiar credencial</button>
+          </div>
+        </section>
+
+        <section class="api-quick-grid">
+          <article class="panel api-step">
+            <span class="step-number">1</span>
+            <h2>Configure a oferta</h2>
+            <p>No admin da oferta, preencha gateways, pixels, UTMfy e Pushcut. O site externo nao precisa saber dessas chaves.</p>
+          </article>
+          <article class="panel api-step">
+            <span class="step-number">2</span>
+            <h2>Cole o SDK</h2>
+            <p>Use o bloco completo se quiser trackear tudo. Use os blocos separados se a oferta ja tem JS proprio.</p>
+          </article>
+          <article class="panel api-step">
+            <span class="step-number">3</span>
+            <h2>Gere o PIX</h2>
+            <p>Seu front manda valor e cliente. A LEOHUB tenta o gateway principal e faz fallback automaticamente.</p>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Credencial da oferta</h2>
+              <p class="muted">Use essa chave no header <code>x-leohub-offer-key</code>. Ela identifica qual oferta vai receber leads, PIX e eventos.</p>
+            </div>
+            <span id="api-selected-offer" class="pill">-</span>
+          </div>
+          <div class="api-key-line">
+            <code id="api-public-key">Selecione uma oferta</code>
+            <button class="secondary" type="button" data-copy-target="api-public-key">Copiar</button>
+          </div>
+        </section>
+
+        <section class="api-doc-grid">
+          <article class="panel api-doc-card">
+            <div class="panel-head">
+              <div>
+                <h2>Codigo completo para colar no HTML</h2>
+                <p class="muted">Esse bloco ja cria sessao, captura UTMs, envia pageview, envia evento e deixa funcoes prontas para gerar/consultar PIX.</p>
+              </div>
+              <button class="secondary" type="button" data-copy-target="code-full">Copiar</button>
+            </div>
+            <pre id="code-full" class="code"></pre>
+          </article>
+
+          <article class="panel api-doc-card">
+            <div class="panel-head">
+              <div>
+                <h2>Gerar PIX</h2>
+                <p class="muted">Chame quando o cliente finalizar checkout. Retorna copia e cola, QR e gateway usado.</p>
+              </div>
+              <button class="secondary" type="button" data-copy-target="code-pix">Copiar</button>
+            </div>
+            <pre id="code-pix" class="code"></pre>
+          </article>
+
+          <article class="panel api-doc-card">
+            <div class="panel-head">
+              <div>
+                <h2>Consultar status</h2>
+                <p class="muted">Use polling na pagina PIX. Quando pagar, a LEOHUB sincroniza lead, UTMfy, Pushcut e Meta.</p>
+              </div>
+              <button class="secondary" type="button" data-copy-target="code-status">Copiar</button>
+            </div>
+            <pre id="code-status" class="code"></pre>
+          </article>
+
+          <article class="panel api-doc-card">
+            <div class="panel-head">
+              <div>
+                <h2>Trackear eventos customizados</h2>
+                <p class="muted">Use para etapas do funil, quiz, checkout, upsell, clique, lead qualificado e qualquer evento proprio.</p>
+              </div>
+              <button class="secondary" type="button" data-copy-target="code-track">Copiar</button>
+            </div>
+            <pre id="code-track" class="code"></pre>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Mapa dos endpoints</h2>
+              <p class="muted">Todos aceitam a credencial pelo header <code>x-leohub-offer-key</code>.</p>
+            </div>
+            <span class="pill">REST</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Funcao</th>
+                  <th>Endpoint</th>
+                  <th>Metodo</th>
+                  <th>Quando usar</th>
+                </tr>
+              </thead>
+              <tbody id="api-endpoints-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </section>
   </main>
 
