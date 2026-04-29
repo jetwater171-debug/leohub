@@ -108,6 +108,7 @@ function renderApiDocs() {
   $('#code-track').textContent = trackSnippet(base, key);
   $('#api-endpoints-body').innerHTML = [
     ['Config publica', '/api/site/config', 'GET', 'Carregar paginas, pixels publicos, backredirects e flags da oferta.'],
+    ['Sessao publica', '/api/site/session', 'POST', 'Criar/validar uma sessao antes de trackear o funil.'],
     ['Pageview', '/api/lead/pageview', 'POST', 'Salvar visita unica por pagina e capturar UTMs de entrada.'],
     ['Track evento', '/api/lead/track', 'POST', 'Salvar etapa/evento do funil: quiz, dados, checkout, upsell, clique etc.'],
     ['Criar PIX', '/api/pix/create', 'POST', 'Gerar PIX com gateway principal e fallback automatico.'],
@@ -153,6 +154,12 @@ async function leohub(path, body = {}, method = 'POST') {
 }
 
 // Cole em todas as paginas para salvar entrada, UTM, origem e pageview.
+leohub('/api/site/session', {
+  sessionId: leohubSessionId,
+  sourceUrl: location.href,
+  utm: leohubUtm()
+});
+
 leohub('/api/lead/pageview', {
   sessionId: leohubSessionId,
   page: location.pathname,

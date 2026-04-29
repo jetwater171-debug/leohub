@@ -511,7 +511,10 @@ function renderLeads() {
       <div class="admin-toolbar">
         <input id="leads-search" type="text" placeholder="Buscar por nome, email, telefone, CPF, cidade, sessao ou TXID">
         <button id="refresh-leads" class="btn-secondary" type="button">Atualizar</button>
+        <button id="reconcile-leads-pix" class="btn-secondary" type="button">Consultar transacoes</button>
+        <button id="export-leads-csv" class="btn-secondary" type="button">Exportar CSV</button>
         <button id="export-leads-json" class="btn-secondary" type="button">Exportar JSON</button>
+        <span id="leads-action-status" class="admin-muted"></span>
       </div>
       <div class="admin-table-wrap">
         <table class="admin-table admin-table--leads">
@@ -746,6 +749,30 @@ document.addEventListener('click', async (event) => {
     a.download = `leads-${state.offer.slug || state.offer.id}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+  if (event.target.id === 'export-leads-csv') {
+    const response = await fetch(`/api/admin/offers/${encodeURIComponent(state.offer.id)}/leads/export`, {
+      headers: { Authorization: `Bearer ${state.token}` }
+    });
+    const text = await response.text();
+    const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `leads-${state.offer.slug || state.offer.id}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  if (event.target.id === 'reconcile-leads-pix') {
+    const status = $('#leads-action-status');
+    status.textContent = 'Consultando gateways...';
+    const data = await api(`/api/admin/offers/${encodeURIComponent(state.offer.id)}/pix-reconcile`, {
+      method: 'POST',
+      body: JSON.stringify({ limit: 100 })
+    });
+    status.textContent = `Consultados ${data.checked || 0}, atualizados ${data.updated || 0}, pagos ${data.confirmed || 0}.`;
+    await loadCollections();
+    renderLeads();
   }
   if (event.target.id === 'reconcile-pix') {
     const status = $('#reconcile-status');

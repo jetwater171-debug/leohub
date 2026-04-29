@@ -402,9 +402,19 @@ function publicOffer(offer) {
 
 function publicOfferConfig(offer) {
   const settings = offer.settings || {};
+  const metaEnabled = settings.meta?.enabled && settings.meta?.pixelId;
+  const tiktokEnabled = settings.tiktok?.enabled && settings.tiktok?.pixelId;
   return {
     ...(settings.publicConfig || {}),
-    metaPixel: settings.meta?.enabled && settings.meta?.pixelId
+    pixel: metaEnabled
+      ? {
+          enabled: true,
+          id: settings.meta.pixelId,
+          backupId: settings.meta.backupPixelId || '',
+          events: settings.meta.events || {}
+        }
+      : { enabled: false },
+    metaPixel: metaEnabled
       ? {
           enabled: true,
           pixelId: settings.meta.pixelId,
@@ -412,9 +422,10 @@ function publicOfferConfig(offer) {
           events: settings.meta.events || {}
         }
       : { enabled: false },
-    tiktokPixel: settings.tiktok?.enabled && settings.tiktok?.pixelId
+    tiktokPixel: tiktokEnabled
       ? {
           enabled: true,
+          id: settings.tiktok.pixelId,
           pixelId: settings.tiktok.pixelId,
           events: settings.tiktok.events || {}
         }
@@ -1794,6 +1805,49 @@ function queueOfferDispatches(offer, body = {}, req = null) {
   }, req);
 }
 
+function csvEscape(value) {
+  const text = String(value ?? '');
+  if (!/[",\r\n;]/.test(text)) return text;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function leadsToCsv(rows = []) {
+  const headers = [
+    'id', 'sessionId', 'name', 'email', 'phone', 'document', 'stage', 'lastEvent',
+    'pixTxid', 'pixAmount', 'utm_source', 'utm_campaign', 'utm_medium', 'utm_content',
+    'city', 'state', 'createdAt', 'updatedAt'
+  ];
+  const lines = [headers.join(';')];
+  for (const lead of rows) {
+    const payload = asObject(lead.payload);
+    const customer = asObject(payload.customer || payload.personal);
+    const address = asObject(payload.address || payload.shipping);
+    const utm = asObject(lead.utm || payload.utm);
+    const values = [
+      lead.id,
+      lead.sessionId,
+      lead.name || customer.name,
+      lead.email || customer.email,
+      lead.phone || customer.phone,
+      lead.document || customer.document || customer.cpf,
+      lead.stage,
+      lead.lastEvent,
+      lead.pixTxid || payload.pix?.idTransaction,
+      lead.pixAmount || payload.pix?.amount,
+      utm.utm_source || utm.src,
+      utm.utm_campaign,
+      utm.utm_medium,
+      utm.utm_content,
+      address.city,
+      address.state,
+      lead.createdAt,
+      lead.updatedAt
+    ];
+    lines.push(values.map(csvEscape).join(';'));
+  }
+  return lines.join('\r\n');
+}
+
 async function sendUtmify(offer, payload) {
   const cfg = offer?.settings?.utmify || {};
   if (!cfg.enabled || !cfg.endpoint || !cfg.apiKey) return { ok: true, skipped: true, reason: 'utmify_disabled' };
@@ -2017,6 +2071,18 @@ async function handleApi(req, res, pathname) {
     sendJson(res, 200, { ok: true, data: rows });
     return;
   }
+  const leadExportMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/leads\/export$/);
+  if (leadExportMatch && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return;
+    const offer = findOfferById(decodeURIComponent(leadExportMatch[1]));
+    if (!offer) return sendJson(res, 404, { ok: false, error: 'offer_not_found' });
+    let rows = STORE.leads.filter((item) => item.offerId === offer.id);
+    const q = normalizeStatus(req.query.q || '');
+    if (q) rows = rows.filter((item) => normalizeStatus(JSON.stringify(item)).includes(q));
+    const csv = leadsToCsv(rows);
+    sendText(res, 200, csv, 'text/csv; charset=utf-8');
+    return;
+  }
   const leadDetailMatch = pathname.match(/^\/api\/admin\/offers\/([^/]+)\/leads\/([^/]+)$/);
   if (leadDetailMatch && req.method === 'GET') {
     if (!requireAdmin(req, res)) return;
@@ -2098,6 +2164,20 @@ async function handleApi(req, res, pathname) {
     });
     return;
   }
+  if (pathname === '/api/site/session' && (req.method === 'GET' || req.method === 'POST')) {
+    const offer = requireOffer(req, res);
+    if (!offer) return;
+    const body = req.method === 'POST' ? await readJson(req).catch(() => ({})) : {};
+    const sessionId = pickText(body.sessionId, req.query.sessionId, req.query.session_id) || id('session');
+    const lead = upsertLead(offer, {
+      ...body,
+      sessionId,
+      event: body.event || 'session',
+      stage: body.stage || 'session'
+    }, req);
+    sendJson(res, 200, { ok: true, sessionId: lead.sessionId, leadId: lead.id });
+    return;
+  }
   if ((pathname === '/api/lead/track' || pathname === '/api/track') && req.method === 'POST') {
     const offer = requireOffer(req, res);
     if (!offer) return;
@@ -2112,6 +2192,11 @@ async function handleApi(req, res, pathname) {
     const body = await readJson(req);
     const result = recordPageview(offer, body, req);
     sendJson(res, 200, { ok: true, leadId: result.lead.id, pageviewId: result.pageview?.id || '', deduped: result.deduped });
+    return;
+  }
+  if (pathname === '/api/jobs/dispatch' && req.method === 'POST') {
+    await processDispatchQueue();
+    sendJson(res, 200, { ok: true, pending: STORE.dispatches.filter((job) => job.status === 'pending').length });
     return;
   }
   if (pathname === '/api/pix/create' && req.method === 'POST') {
@@ -2129,6 +2214,9 @@ async function handleApi(req, res, pathname) {
       reused: Boolean(result.reused),
       status: result.transaction.status,
       paymentCode: result.transaction.paymentCode,
+      pixCode: result.transaction.paymentCode,
+      qrCode: result.transaction.paymentQrUrl || result.transaction.paymentCodeBase64,
+      qrCodeBase64: result.transaction.paymentCodeBase64,
       paymentCodeBase64: result.transaction.paymentCodeBase64,
       paymentQrUrl: result.transaction.paymentQrUrl
     });
@@ -2151,6 +2239,9 @@ async function handleApi(req, res, pathname) {
       remoteChecked: Boolean(result.remoteChecked),
       remoteError: result.remoteError || '',
       paymentCode: result.transaction.paymentCode,
+      pixCode: result.transaction.paymentCode,
+      qrCode: result.transaction.paymentQrUrl || result.transaction.paymentCodeBase64,
+      qrCodeBase64: result.transaction.paymentCodeBase64,
       paymentCodeBase64: result.transaction.paymentCodeBase64,
       paymentQrUrl: result.transaction.paymentQrUrl
     });
@@ -2215,6 +2306,9 @@ async function handleApi(req, res, pathname) {
       remoteChecked: Boolean(result.remoteChecked),
       remoteError: result.remoteError || '',
       paymentCode: result.transaction.paymentCode,
+      pixCode: result.transaction.paymentCode,
+      qrCode: result.transaction.paymentQrUrl || result.transaction.paymentCodeBase64,
+      qrCodeBase64: result.transaction.paymentCodeBase64,
       paymentCodeBase64: result.transaction.paymentCodeBase64,
       paymentQrUrl: result.transaction.paymentQrUrl
     });
@@ -2235,6 +2329,9 @@ async function handleApi(req, res, pathname) {
       amount: result.transaction.amount,
       gateway: result.transaction.gateway,
       paymentCode: result.transaction.paymentCode,
+      pixCode: result.transaction.paymentCode,
+      qrCode: result.transaction.paymentQrUrl || result.transaction.paymentCodeBase64,
+      qrCodeBase64: result.transaction.paymentCodeBase64,
       paymentCodeBase64: result.transaction.paymentCodeBase64,
       paymentQrUrl: result.transaction.paymentQrUrl
     });
