@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LEOHUB</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">LH</span>
+        <div>
+          <strong>LEOHUB</strong>
+          <small>Core de ofertas</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item is-active" data-view="overview" type="button">Visao geral</button>
+        <button class="nav-item" data-view="offers" type="button">Ofertas</button>
+        <button class="nav-item" data-view="offer" type="button">Painel da oferta</button>
+        <button class="nav-item" data-view="integrations" type="button">Integracoes</button>
+        <button class="nav-item" data-view="docs" type="button">Documentacao</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="api-status" class="status-dot"></span>
+        <span id="api-status-text">Conectando</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section id="login-screen" class="login-screen">
+        <form id="login-form" class="login-box">
+          <span class="eyebrow">Acesso master</span>
+          <h1>LEOHUB</h1>
+          <p>Entre para criar ofertas, gerar credenciais e operar tracking, PIX e integracoes.</p>
+          <label>
+            Senha do admin
+            <input id="admin-password" type="password" autocomplete="current-password" placeholder="admin">
+          </label>
+          <button class="primary" type="submit">Entrar</button>
+          <span id="login-error" class="error"></span>
+        </form>
+      </section>
+
+      <section id="app-screen" class="app-screen hidden">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Operacao central</span>
+            <h1 id="view-title">Visao geral</h1>
+          </div>
+          <div class="topbar-actions">
+            <select id="offer-select" aria-label="Oferta ativa"></select>
+            <button id="refresh-btn" class="secondary" type="button">Atualizar</button>
+            <button id="logout-btn" class="ghost" type="button">Sair</button>
+          </div>
+        </header>
+
+        <section id="default-password-alert" class="notice hidden">
+          A senha local ainda esta como <strong>admin</strong>. Antes de publicar, defina <code>LEOHUB_ADMIN_PASSWORD</code>.
+        </section>
+
+        <div id="view-overview" class="view">
+          <div class="metric-grid">
+            <article class="metric"><span>Ofertas</span><strong id="m-offers">0</strong></article>
+            <article class="metric"><span>Leads</span><strong id="m-leads">0</strong></article>
+            <article class="metric"><span>Eventos</span><strong id="m-events">0</strong></article>
+            <article class="metric"><span>PIX gerados</span><strong id="m-transactions">0</strong></article>
+            <article class="metric"><span>Pagos</span><strong id="m-paid">0</strong></article>
+            <article class="metric"><span>Receita</span><strong id="m-revenue">R$ 0,00</strong></article>
+          </div>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Ofertas ativas</h2>
+                <button class="secondary" data-view-jump="offers" type="button">Criar oferta</button>
+              </div>
+              <div id="offers-list" class="offer-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Atividade recente</h2>
+                <span id="recent-count" class="pill">0</span>
+              </div>
+              <div id="recent-feed" class="feed"></div>
+            </section>
+          </div>
+        </div>
+
+        <div id="view-offers" class="view hidden">
+          <div class="split">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Criar oferta</h2>
+                <span class="pill">token automatico</span>
+              </div>
+              <form id="create-offer-form" class="form-grid">
+                <label>
+                  Nome da oferta
+                  <input name="name" placeholder="Ex: Oferta Bag Premium" required>
+                </label>
+                <label>
+                  Slug
+                  <input name="slug" placeholder="oferta-bag-premium">
+                </label>
+                <label class="wide">
+                  Descricao
+                  <textarea name="description" rows="3" placeholder="Resumo interno da oferta"></textarea>
+                </label>
+                <button class="primary wide" type="submit">Criar oferta</button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Ofertas cadastradas</h2>
+                <span id="offers-table-count" class="pill">0</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Oferta</th>
+                      <th>Leads</th>
+                      <th>PIX</th>
+                      <th>Pago</th>
+                      <th>Gateway</th>
+                    </tr>
+                  </thead>
+                  <tbody id="offers-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div id="view-offer" class="view hidden">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 id="offer-name">Oferta</h2>
+                <p id="offer-description" class="muted"></p>
+              </div>
+              <div class="inline-actions">
+                <button id="copy-public-key" class="secondary" type="button">Copiar credencial</button>
+                <button id="rotate-key" class="danger" type="button">Rotacionar chave</button>
+              </div>
+            </div>
+            <div class="key-grid">
+              <label>
+                Credencial publica
+                <input id="offer-public-key" readonly>
+              </label>
+              <label>
+                ID da oferta
+                <input id="offer-id" readonly>
+              </label>
+              <label>
+                Slug
+                <input id="offer-slug" readonly>
+              </label>
+            </div>
+          </section>
+
+          <div class="tabs">
+            <button class="tab is-active" data-offer-tab="leads" type="button">Leads</button>
+            <button class="tab" data-offer-tab="events" type="button">Eventos</button>
+            <button class="tab" data-offer-tab="transactions" type="button">PIX</button>
+            <button class="tab" data-offer-tab="dispatches" type="button">Fila</button>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2 id="offer-table-title">Leads</h2>
+              <span id="offer-table-count" class="pill">0</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead id="offer-table-head"></thead>
+                <tbody id="offer-table-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="view-integrations" class="view hidden">
+          <form id="settings-form">
+            <div class="split">
+              <section class="panel">
+                <div class="panel-head">
+                  <h2>Gateways PIX</h2>
+                  <button class="primary" type="submit">Salvar configuracoes</button>
+                </div>
+                <div class="form-grid">
+                  <label>
+                    Gateway ativo
+                    <select name="payments.activeGateway">
+                      <option value="atomopay">AtomoPay</option>
+                      <option value="paradise">Paradise</option>
+                      <option value="sunize">Sunize</option>
+                      <option value="ghostspay">GhostsPay</option>
+                    </select>
+                  </label>
+                  <label>
+                    Ordem de fallback
+                    <input name="payments.gatewayOrderText" placeholder="atomopay,paradise,sunize,ghostspay">
+                  </label>
+                </div>
+                <div id="gateway-configs" class="gateway-list"></div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <h2>Eventos externos</h2>
+                  <span id="settings-status" class="muted"></span>
+                </div>
+                <div class="form-grid">
+                  <label class="toggle">
+                    <input name="utmify.enabled" type="checkbox">
+                    <span>UTMify ativo</span>
+                  </label>
+                  <label>
+                    Endpoint UTMify
+                    <input name="utmify.endpoint">
+                  </label>
+                  <label>
+                    API Key UTMify
+                    <input name="utmify.apiKey" type="password">
+                  </label>
+                  <label>
+                    Plataforma UTMify
+                    <input name="utmify.platform">
+                  </label>
+                  <label class="toggle">
+                    <input name="pushcut.enabled" type="checkbox">
+                    <span>Pushcut ativo</span>
+                  </label>
+                  <label>
+                    Pushcut PIX gerado
+                    <input name="pushcut.pixCreatedUrl">
+                  </label>
+                  <label>
+                    Pushcut PIX pago
+                    <input name="pushcut.pixConfirmedUrl">
+                  </label>
+                  <label class="toggle">
+                    <input name="meta.enabled" type="checkbox">
+                    <span>Meta CAPI ativo</span>
+                  </label>
+                  <label>
+                    Pixel ID
+                    <input name="meta.pixelId">
+                  </label>
+                  <label>
+                    Access Token
+                    <input name="meta.accessToken" type="password">
+                  </label>
+                  <label>
+                    Test Event Code
+                    <input name="meta.testEventCode">
+                  </label>
+                </div>
+              </section>
+            </div>
+          </form>
+        </div>
+
+        <div id="view-docs" class="view hidden">
+          <div class="split">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Integracao rapida</h2>
+                <button id="copy-docs" class="secondary" type="button">Copiar exemplo</button>
+              </div>
+              <pre id="docs-code" class="code"></pre>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Testar API</h2>
+                <span id="tester-status" class="muted"></span>
+              </div>
+              <form id="api-tester" class="form-grid">
+                <label>
+                  Valor
+                  <input name="amount" value="19.90">
+                </label>
+                <label>
+                  Nome
+                  <input name="name" value="Cliente LEOHUB">
+                </label>
+                <label>
+                  Email
+                  <input name="email" value="cliente@leohub.local">
+                </label>
+                <label>
+                  CPF
+                  <input name="document" value="12345678909">
+                </label>
+                <button class="primary wide" type="submit">Gerar PIX de teste</button>
+              </form>
+              <pre id="tester-result" class="code small"></pre>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

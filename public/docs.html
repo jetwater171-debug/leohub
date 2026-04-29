@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LEOHUB Docs</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="docs-page">
+  <main class="docs-wrap">
+    <span class="eyebrow">LEOHUB API</span>
+    <h1>Documentacao de integracao</h1>
+    <p>Use a credencial publica da oferta no header <code>x-leohub-offer-key</code>. A oferta nao precisa conhecer gateways, tokens de pagamento ou webhooks.</p>
+    <section class="panel">
+      <h2>Endpoints principais</h2>
+      <pre class="code">GET  /api/v1/offer/config
+POST /api/v1/pageview
+POST /api/v1/track
+POST /api/v1/pix/create
+POST /api/v1/pix/status
+POST /api/v1/webhooks/:gateway</pre>
+    </section>
+    <section class="panel">
+      <h2>Gerar PIX</h2>
+      <pre class="code">const res = await fetch('https://sua-leohub.com/api/v1/pix/create', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-leohub-offer-key': 'lh_pub_xxx'
+  },
+  body: JSON.stringify({
+    amount: 29.90,
+    sessionId: 'lead-123',
+    customer: {
+      name: 'Cliente Teste',
+      email: 'cliente@email.com',
+      document: '12345678909',
+      phone: '11999999999'
+    },
+    items: [{ title: 'Produto', price: 29.90, quantity: 1 }],
+    utm: { utm_source: 'facebook', utm_campaign: 'campanha' }
+  })
+});
+
+const pix = await res.json();</pre>
+    </section>
+  </main>
+</body>
+</html>
